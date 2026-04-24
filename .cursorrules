@@ -1,0 +1,2 @@
+Gunakan kredensial Supabase hanya dari environment variables (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, dan secret key hanya di server bila benar-benar diperlukan), jangan hardcode key di source code.
+Untuk setiap query database Supabase, selalu prioritaskan keamanan dengan Row Level Security (RLS): pastikan tabel target RLS-enabled dan akses data mengikuti policy berbasis role/user yang sesuai.
