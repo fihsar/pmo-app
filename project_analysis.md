@@ -17,6 +17,7 @@ The app is now in a better performance state than the original version.
 - The main dashboard summary is no longer computed entirely in the browser. It now prefers the SQL RPC `get_dashboard_summary()` and only falls back to client-side aggregation if the RPC fails.
 - The Projects, Prospects, and Backlog pages were moved away from large client-side scan/filter/sort loops and now use server-side paging, filtering, and counts.
 - The batch mismatch that caused `column prospects.batch_number does not exist` has been fixed by adding the missing schema fields and aligning the upload/query path.
+- The latest production build now passes locally with `frontend npm run build`; the Vercel failure was caused by strict TypeScript checks in the dashboard and prospects pages, not by Vercel config.
 - Login/session handling is now centralized in a shared Supabase auth provider, so the app keeps session state consistent across the login page, dashboard layout, and route redirects.
 - The classification logic for FCC/CSS is centralized and updated with the requested keyword additions.
 - Workbook files are no longer meant to stay tracked in the repo. A root `.gitignore` now ignores `*.xlsx`, and the stray workbook binaries were removed from the workspace.

@@ -144,6 +144,31 @@ const ChartTooltip = ({ active, payload, label }: any) => {
   return null;
 };
 
+const mapDashboardSummary = (row: DashboardSummaryRow): DashboardStats => {
+  const toNumber = (value: number | string | null | undefined) => {
+    if (value === null || value === undefined || value === "") return 0;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  return {
+    total: toNumber(row.total),
+    avgProgress: toNumber(row.avg_progress),
+    avgPqiTime: toNumber(row.avg_pqi_time),
+    avgPqiCost: toNumber(row.avg_pqi_cost),
+    pqiTimeData: row.pqi_time_data ?? [],
+    pqiCostData: row.pqi_cost_data ?? [],
+    schedData: row.sched_data ?? [],
+    finData: row.fin_data ?? [],
+    progressData: row.progress_data ?? [],
+    pmData: row.pm_data ?? [],
+    catData: row.cat_data ?? [],
+    budgetData: row.budget_data ?? [],
+    amAchievementData: row.am_achievement_data ?? [],
+    totalGrossProfit: toNumber(row.total_gross_profit),
+  };
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -459,7 +484,7 @@ export default function DashboardPage() {
               {loading ? <Skeleton className="h-56 w-full" /> : (
                 <ResponsiveContainer width="100%" height={220}>
                   <PieChart>
-                    <Pie data={stats!.pqiTimeData} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={3} dataKey="value" label={({ name, percent }) => `${name} ${(percent*100).toFixed(0)}%`} labelLine={false}>
+                    <Pie data={stats!.pqiTimeData} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={3} dataKey="value" label={({ name, percent = 0 }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false}>
                       {stats!.pqiTimeData.map((entry) => (
                         <Cell key={entry.name} fill={PQI_COLORS[entry.name as keyof typeof PQI_COLORS] ?? "#94a3b8"} />
                       ))}
@@ -480,7 +505,7 @@ export default function DashboardPage() {
               {loading ? <Skeleton className="h-56 w-full" /> : (
                 <ResponsiveContainer width="100%" height={220}>
                   <PieChart>
-                    <Pie data={stats!.pqiCostData} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={3} dataKey="value" label={({ name, percent }) => `${name} ${(percent*100).toFixed(0)}%`} labelLine={false}>
+                    <Pie data={stats!.pqiCostData} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={3} dataKey="value" label={({ name, percent = 0 }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false}>
                       {stats!.pqiCostData.map((entry) => (
                         <Cell key={entry.name} fill={PQI_COLORS[entry.name as keyof typeof PQI_COLORS] ?? "#94a3b8"} />
                       ))}
