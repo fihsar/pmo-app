@@ -115,9 +115,11 @@ These database updates were part of the fix and performance work:
 - Consider whether the dashboard fallback path is still needed long-term, or whether the RPC should become the single source of truth.
 - If more Excel template files appear during work, keep them ignored or out of the repo.
 - Session lifetime is controlled in the Supabase dashboard, not in the app code; check Auth settings for time-boxed sessions, inactivity timeout, single-session limits, and JWT expiration.
+- Vercel deployment should target the `frontend` app root; if you later split backend logic into its own deployed service, create a separate Vercel project for that service instead of trying to run both from one Next.js deployment.
 
 ## 9. Guidance For Future Agents
 - After every code or schema change, update this handoff with what changed and the next step before moving on.
+- Keep the Vercel config aligned with the frontend app root, and use separate Vercel projects for any additional services.
 - Keep the shared auth session provider in sync with any future login or logout flow changes.
 - Keep dashboard aggregation in SQL where possible; avoid reintroducing large client-side reductions.
 - Preserve the latest-batch model across list pages and summary logic.
