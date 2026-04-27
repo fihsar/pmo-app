@@ -108,6 +108,7 @@ These database updates were part of the fix and performance work:
 - Workbook artifacts should not be committed.
 - The workspace `.gitignore` now ignores `*.xlsx`.
 - The previous workbook binaries were removed from the workspace to keep the repo clean.
+- `frontend` was previously stored as a gitlink entry, which made GitHub show it as a pointer instead of normal folder contents; it is now being tracked as regular files in the root repo.
 
 ## 8. Remaining Follow-Ups
 - Add or strengthen tests around the dashboard RPC mapping and the upload header validation paths.

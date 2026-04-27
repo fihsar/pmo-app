@@ -1,0 +1,704 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ArrowUpDown, ArrowUp, ArrowDown, Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Clock, Upload } from "lucide-react";
+import * as XLSX from "xlsx";
+import { isSupabaseConfigured, supabase } from "@/lib/supabase";
+import { cn } from "@/lib/utils";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { determineCategory } from "@/lib/classification";
+
+type Project = {
+  id?: string;
+  project_id: string | null;
+  customer: string | null;
+  project_name: string | null;
+  project_reference: string | null;
+  project_manager: string | null;
+  account_manager: string | null;
+  pcs_status: string | null;
+  project_category: string | null;
+  client_po_date: string | null;
+  contract_date: string | null;
+  first_issued_date: string | null;
+  project_start_date: string | null;
+  project_end_date: string | null;
+  golive_date: string | null;
+  actual_golive_date: string | null;
+  warranty_end_date: string | null;
+  actual_warranty_end_date: string | null;
+  maintenance_end_date: string | null;
+  main_delivery_team: string | null;
+  pqi_time: number | null;
+  pqi_time_r_0: number | null;
+  pqi_cost: number | null;
+  pqi_cost_r_0: number | null;
+  pqi: number | null;
+  pqi_r0: number | null;
+  schedule_health: string | null;
+  financial_health: string | null;
+  total_sales: number | null;
+  gross_profit: number | null;
+  npp: number | null;
+  npp_actual: number | null;
+  budget_by_progress: number | null;
+  total_budget: number | null;
+  budget_usage: number | null;
+  variance_budget_usage: number | null;
+  modified_date: string | null;
+  progress_date: string | null;
+  percentage_progress: number | null;
+  current_stage: string | null;
+  progress_note: string | null;
+  sales_osl: number | null;
+  sales_3sw: number | null;
+  sales_3sv: number | null;
+  sales_3hw: number | null;
+  sales_osv_osl: number | null;
+  sales_osv_nonosl: number | null;
+  sales_need_invoice_as_june_2020: number | null;
+  gp_osl: number | null;
+  gp_3sw: number | null;
+  gp_3sv: number | null;
+  gp_3hw: number | null;
+  gp_osv_osl: number | null;
+  gp_osv_nonosl: number | null;
+  gp_need_invoice_as_june_2020: number | null;
+  batch_number?: number;
+  upload_date?: string;
+  category?: string | null;
+  category_note?: string | null;
+};
+
+// Helpers for robust parsing
+const parseDate = (value: any): string | null => {
+  if (!value) return null;
+  // Handle Excel serial number (no timezone issues)
+  if (typeof value === "number") {
+    const utcDays = Math.floor(value) - 25569;
+    const ms = utcDays * 86400 * 1000;
+    const d = new Date(ms);
+    const yyyy = d.getUTCFullYear();
+    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(d.getUTCDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  }
+  // Handle Date object (fallback)
+  if (value instanceof Date) {
+    const yyyy = value.getUTCFullYear();
+    const mm = String(value.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(value.getUTCDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  }
+  // Handle string dates
+  if (typeof value === "string" && value.trim()) {
+    return value.trim().split("T")[0];
+  }
+  return null;
+};
+
+const parseNumeric = (value: any): number | null => {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+
+    // Accept common Excel/user formatting like "75%", "1,234.56", or "75,5"
+    const withoutPercent = trimmed.replace(/%/g, "");
+    const normalized = withoutPercent.includes(",") && !withoutPercent.includes(".")
+      ? withoutPercent.replace(/,/g, ".")
+      : withoutPercent.replace(/,/g, "");
+
+    const num = Number(normalized);
+    return isNaN(num) ? null : num;
+  }
+
+  const num = Number(value);
+  return isNaN(num) ? null : num;
+};
+
+const pickNumeric = (obj: any, keys: string[]): number | null => {
+  for (const key of keys) {
+    if (obj && Object.prototype.hasOwnProperty.call(obj, key)) {
+      const parsed = parseNumeric(obj[key]);
+      if (parsed !== null) return parsed;
+    }
+  }
+  return null;
+};
+
+const normalizeProject = (project: any): Project => ({
+  ...project,
+  percentage_progress: pickNumeric(project, [
+    "percentage_progress",
+    "PERCENTAGE_PROGRESS",
+    "Percentage Progress",
+  ]),
+  pqi_time: pickNumeric(project, [
+    "pqi_time",
+    "PQI_TIME",
+    "PQI Time",
+  ]),
+  pqi_cost: pickNumeric(project, [
+    "pqi_cost",
+    "PQI_COST",
+    "PQI Cost",
+  ]),
+});
+
+const isMissingBatchColumnError = (error: any): boolean => {
+  const msg = String(error?.message || "").toLowerCase();
+  return msg.includes("batch_number") && msg.includes("does not exist");
+};
+
+const getPqiTimeConfig = (val: number | null) => {
+  if (val === null) return { color: "bg-muted", textColor: "text-muted-foreground" };
+  if (val < 1) return { color: "bg-foreground", textColor: "text-foreground" };
+  if (val <= 70) return { color: "bg-red-500", textColor: "text-red-600 dark:text-red-500" };
+  if (val < 91) return { color: "bg-yellow-500", textColor: "text-yellow-600 dark:text-yellow-500" };
+  return { color: "bg-green-600", textColor: "text-green-600 dark:text-green-500" };
+};
+
+export default function ProjectsPage() {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [totalProjectsCount, setTotalProjectsCount] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  const [searchQuery, setSearchQuery] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [sortConfig, setSortConfig] = useState<{ key: keyof Project; direction: "asc" | "desc" } | null>(null);
+  
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  const escapeSearch = (value: string) => value.trim().replace(/,/g, " ");
+
+  const getProjectsOrderColumn = (key: keyof Project) => {
+    switch (key) {
+      case "project_id":
+      case "project_name":
+      case "customer":
+      case "project_manager":
+      case "category":
+        return key;
+      case "percentage_progress":
+        return "percentage_progress";
+      case "pqi_time":
+        return "pqi_time";
+      case "pqi_cost":
+        return "pqi_cost";
+      default:
+        return "created_at";
+    }
+  };
+
+  const loadProjects = async () => {
+    if (!isSupabaseConfigured) return;
+    setLoading(true);
+    
+    const { data: maxBatchData, error: maxBatchError } = await supabase
+      .from("projects")
+      .select("batch_number")
+      .order("batch_number", { ascending: false })
+      .limit(1);
+      
+    if (maxBatchError) {
+      if (isMissingBatchColumnError(maxBatchError)) {
+        setError("Projects table is missing batch_number. Run backend/add_batch_columns.sql to enable safe batch mode.");
+      } else {
+        console.error("Failed to fetch max batch_number:", maxBatchError.message);
+        setError(`Failed to load projects: ${maxBatchError.message}`);
+      }
+      setProjects([]);
+      setLoading(false);
+      return;
+    }
+    
+    const maxBatch = maxBatchData && maxBatchData.length > 0 ? maxBatchData[0].batch_number : 0;
+
+    if (maxBatch > 0) {
+      const start = (currentPage - 1) * pageSize;
+      const end = start + pageSize - 1;
+      const orderColumn = sortConfig ? getProjectsOrderColumn(sortConfig.key) : "created_at";
+      const ascending = sortConfig ? sortConfig.direction === "asc" : false;
+
+      let query = supabase
+        .from("projects")
+        .select("id, project_id, customer, project_name, project_manager, pqi_time, pqi_cost, percentage_progress, category, category_note, batch_number, created_at", { count: "exact" })
+        .eq("batch_number", maxBatch);
+
+      if (categoryFilter !== "all") {
+        query = query.eq("category", categoryFilter);
+      }
+
+      if (searchQuery.trim()) {
+        const q = escapeSearch(searchQuery);
+        query = query.or(
+          [
+            `project_id.ilike.%${q}%`,
+            `project_name.ilike.%${q}%`,
+            `customer.ilike.%${q}%`,
+            `project_manager.ilike.%${q}%`,
+            `category.ilike.%${q}%`,
+          ].join(",")
+        );
+      }
+
+      const { data, error, count } = await query
+        .order(orderColumn, { ascending })
+        .order("created_at", { ascending: false })
+        .range(start, end);
+
+      if (error) {
+        console.error("Failed to load projects:", error.message);
+        setError(`Failed to load projects: ${error.message}`);
+        setProjects([]);
+        setTotalProjectsCount(0);
+      } else {
+        setProjects((data || []).map((project) => normalizeProject(project)));
+        setTotalProjectsCount(count || 0);
+      }
+    } else {
+      setProjects([]);
+      setTotalProjectsCount(0);
+    }
+    
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    void loadProjects();
+  }, [searchQuery, categoryFilter, sortConfig, currentPage, pageSize]);
+
+  // Reset pagination if search or sort changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, sortConfig, pageSize, categoryFilter]);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setLoading(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const data = await file.arrayBuffer();
+      // cellDates: true converts Excel dates into JS Dates automatically
+      const workbook = XLSX.read(data, { type: "array" });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+
+      const json = XLSX.utils.sheet_to_json(worksheet, { defval: null }) as any[];
+
+      if (json.length > 0) {
+        const headers = Object.keys(json[0]);
+        const requiredProjectHeaders = ["PERCENTAGE_PROGRESS", "PQI_TIME", "PQI_COST"];
+        const missingProjectHeaders = requiredProjectHeaders.filter((h) => !headers.includes(h));
+
+        if (missingProjectHeaders.length > 0) {
+          const looksLikeProjectTargetTemplate = ["TARGET_DATE", "GP_ACC", "INVOICE_DATE"].every((h) => headers.includes(h));
+
+          if (looksLikeProjectTargetTemplate) {
+            throw new Error(
+              "Wrong template: this looks like Project_Target*.xlsx (Backlog data). Upload this file in Backlog page, not Projects page."
+            );
+          }
+
+          throw new Error(
+            `Invalid Projects template. Missing required columns: ${missingProjectHeaders.join(", ")}`
+          );
+        }
+      }
+
+      const newProjects: Project[] = json.map((row) => {
+        const categoryResult = determineCategory(row as Record<string, unknown>);
+        return normalizeProject({
+          project_id: row["PROJECT_ID"] || null,
+          customer: row["CUSTOMER"] || null,
+          project_name: row["PROJECT_NAME"] || null,
+          project_reference: row["PROJECT_REFERENCE"] || null,
+          project_manager: row["PROJECT_MANAGER"] || null,
+          account_manager: row["ACCOUNT_MANAGER"] || null,
+          pcs_status: row["PCS_STATUS"] || null,
+          project_category: row["PROJECT_CATEGORY"] || null,
+          client_po_date: parseDate(row["CLIENT_PO_DATE"]),
+          contract_date: parseDate(row["CONTRACT_DATE"]),
+          first_issued_date: parseDate(row["FIRST_ISSUED_DATE"]),
+          project_start_date: parseDate(row["PROJECT_START_DATE"]),
+          project_end_date: parseDate(row["PROJECT_END_DATE"]),
+          golive_date: parseDate(row["GOLIVE_DATE"]),
+          actual_golive_date: parseDate(row["ACTUAL_GOLIVE_DATE"]),
+          warranty_end_date: parseDate(row["WARRANTY_END_DATE"]),
+          actual_warranty_end_date: parseDate(row["ACTUAL_WARRANTY_END_DATE"]),
+          maintenance_end_date: parseDate(row["MAINTENANCE_END_DATE"]),
+          main_delivery_team: row["MAIN_DELIVERY_TEAM"] || null,
+          pqi_time: parseNumeric(row["PQI_TIME"]),
+          pqi_time_r_0: parseNumeric(row["PQI_TIME_R_0"]),
+          pqi_cost: parseNumeric(row["PQI_COST"]),
+          pqi_cost_r_0: parseNumeric(row["PQI_COST_R_0"]),
+          pqi: parseNumeric(row["PQI"]),
+          pqi_r0: parseNumeric(row["PQI_R0"]),
+          schedule_health: row["SCHEDULE_HEALTH"] || null,
+          financial_health: row["FINANCIAL_HEALTH"] || null,
+          total_sales: parseNumeric(row["TOTAL_SALES"]),
+          gross_profit: parseNumeric(row["GROSS_PROFIT"]),
+          npp: parseNumeric(row["NPP"]),
+          npp_actual: parseNumeric(row["NPP_ACTUAL"]),
+          budget_by_progress: parseNumeric(row["BUDGET_BY_PROGRESS"]),
+          total_budget: parseNumeric(row["TOTAL_BUDGET"]),
+          budget_usage: parseNumeric(row["BUDGET_USAGE"]),
+          variance_budget_usage: parseNumeric(row["VARIANCE_BUDGET_USAGE"]),
+          modified_date: parseDate(row["MODIFIED_DATE"]),
+          progress_date: parseDate(row["PROGRESS_DATE"]),
+          percentage_progress: parseNumeric(row["PERCENTAGE_PROGRESS"]),
+          current_stage: row["CURRENT_STAGE"] || null,
+          progress_note: row["PROGRESS_NOTE"] || null,
+          sales_osl: parseNumeric(row["SALES_OSL"]),
+          sales_3sw: parseNumeric(row["SALES_3SW"]),
+          sales_3sv: parseNumeric(row["SALES_3SV"]),
+          sales_3hw: parseNumeric(row["SALES_3HW"]),
+          sales_osv_osl: parseNumeric(row["SALES_OSV_OSL"]),
+          sales_osv_nonosl: parseNumeric(row["SALES_OSV_NonOSL"]),
+          sales_need_invoice_as_june_2020: parseNumeric(row["SALES_NEED_INVOICE_AS_JUNE_2020"]),
+          gp_osl: parseNumeric(row["GP_OSL"]),
+          gp_3sw: parseNumeric(row["GP_3SW"]),
+          gp_3sv: parseNumeric(row["GP_3SV"]),
+          gp_3hw: parseNumeric(row["GP_3HW"]),
+          gp_osv_osl: parseNumeric(row["GP_OSV_OSL"]),
+          gp_osv_nonosl: parseNumeric(row["GP_OSV_NonOSL"]),
+          gp_need_invoice_as_june_2020: parseNumeric(row["GP_NEED_INVOICE_AS_JUNE_2020"]),
+          category: categoryResult.category,
+          category_note: categoryResult.category_note,
+        });
+      });
+
+      if (newProjects.length === 0) {
+        throw new Error("No valid data found in Excel sheet.");
+      }
+
+      // If Supabase is configured, try to save to DB
+      if (isSupabaseConfigured) {
+        const { data: maxBatchData, error: maxBatchError } = await supabase
+          .from("projects")
+          .select("batch_number")
+          .order("batch_number", { ascending: false })
+          .limit(1);
+
+        if (maxBatchError) {
+          if (isMissingBatchColumnError(maxBatchError)) {
+            throw new Error(
+              "Upload blocked: projects.batch_number is missing. Run backend/add_batch_columns.sql first."
+            );
+          }
+          throw maxBatchError;
+        }
+
+        const nextBatch = (maxBatchData && maxBatchData.length > 0 ? maxBatchData[0].batch_number : 0) + 1;
+
+        // Insert chunks of 1000 to prevent oversized payloads if Excel is huge
+        const CHUNK_SIZE = 1000;
+
+        const newProjectsWithBatch = newProjects.map((project) => ({
+          ...project,
+          batch_number: nextBatch,
+        }));
+
+        for (let i = 0; i < newProjectsWithBatch.length; i += CHUNK_SIZE) {
+          const chunk = newProjectsWithBatch.slice(i, i + CHUNK_SIZE);
+          const { error: insertError } = await supabase.from("projects").insert(chunk);
+          if (insertError) {
+            throw new Error(`Failed to save to database. Note: You need to run the updated SQL script to create the 55-column 'projects' table first! Details: ${insertError.message}`);
+          }
+        }
+        setSuccess(`Successfully imported and saved ${newProjects.length} projects in batch ${nextBatch}!`);
+
+        await loadProjects();
+      } else {
+        // Just show them locally if no supabase
+        setProjects((prev) => [...newProjects, ...prev]);
+        setSuccess(`Loaded ${newProjects.length} projects locally.`);
+      }
+    } catch (err: any) {
+      setError(err.message || "Failed to parse Excel file.");
+    } finally {
+      setLoading(false);
+      e.target.value = ""; // Reset input
+    }
+  };
+
+  const handleSort = (key: keyof Project) => {
+    let direction: "asc" | "desc" = "asc";
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === "asc") {
+      direction = "desc";
+    }
+    setSortConfig({ key, direction });
+  };
+
+  const totalPages = Math.ceil(totalProjectsCount / pageSize);
+
+  const renderSortableHeader = (label: React.ReactNode, key: keyof Project, title?: string, align: "left" | "center" = "left", className?: string) => {
+    const isActive = sortConfig?.key === key;
+    return (
+      <th 
+        className={cn(
+          "py-2 pr-3 font-medium cursor-pointer hover:text-foreground select-none group",
+          align === "center" && "text-center pr-0",
+          className
+        )}
+        onClick={() => handleSort(key)}
+        title={title}
+      >
+        <div className={cn("flex items-center gap-1", align === "center" && "justify-center")}>
+          {align === "center" && <div className="w-3.5" />} {/* Spacer to balance sort icon */}
+          {label}
+          {isActive ? (
+            sortConfig.direction === "asc" ? (
+              <ArrowUp className="h-3.5 w-3.5" />
+            ) : (
+              <ArrowDown className="h-3.5 w-3.5" />
+            )
+          ) : (
+            <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground/30 opacity-0 group-hover:opacity-100 transition-opacity" />
+          )}
+        </div>
+      </th>
+    );
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between rounded-2xl border bg-card p-6 shadow-sm">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">List of Projects</h1>
+          <p className="text-sm text-muted-foreground">
+            Manage all projects and import data from Excel.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <Button variant="outline" asChild disabled={loading}>
+            <label className="cursor-pointer flex items-center gap-2">
+              <Upload className="h-4 w-4" />
+              Upload Excel
+              <input
+                type="file"
+                className="hidden"
+                accept=".xlsx, .xls, .csv"
+                onChange={handleFileUpload}
+              />
+            </label>
+          </Button>
+        </div>
+      </div>
+
+      <Card className="border shadow-sm">
+        <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-2 sm:space-y-0">
+          <div>
+            <CardTitle>All Projects</CardTitle>
+            <CardDescription>
+              {error && <span className="text-destructive font-medium block mt-1">{error}</span>}
+              {success && <span className="text-green-600 dark:text-green-400 font-medium block mt-1">{success}</span>}
+              {totalProjectsCount > 0 && <span className="block mt-1">Showing {projects.length} of {totalProjectsCount} projects</span>}
+            </CardDescription>
+          </div>
+          <div className="flex flex-col md:flex-row items-center gap-3 w-full sm:w-auto">
+            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <SelectTrigger className="w-[130px] h-9 text-xs">
+                <SelectValue placeholder="Category" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Categories</SelectItem>
+                <SelectItem value="FCC">FCC</SelectItem>
+                <SelectItem value="CSS">CSS</SelectItem>
+                <SelectItem value="UNCLASSIFIED">Unclassified</SelectItem>
+              </SelectContent>
+            </Select>
+            <div className="relative w-full sm:max-w-xs">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                type="search"
+                placeholder="Search projects..."
+                className="pl-8 h-9"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] border-collapse text-xs">
+              <thead>
+                <tr className="border-b text-left text-muted-foreground whitespace-nowrap">
+                  {renderSortableHeader("PID", "project_id")}
+                  {renderSortableHeader("Project Name", "project_name")}
+                  {renderSortableHeader("Customer", "customer")}
+                  {renderSortableHeader("Project Manager", "project_manager", undefined, "left", "min-w-[200px] whitespace-nowrap")}
+                  {renderSortableHeader("Progress", "percentage_progress")}
+                  {renderSortableHeader("Category", "category")}
+                  {renderSortableHeader("Time", "pqi_time", "PQI TIME", "center")}
+                  {renderSortableHeader("Cost", "pqi_cost", "PQI COST", "center")}
+                </tr>
+              </thead>
+              <tbody>
+                {loading && projects.length === 0 ? (
+                  <tr>
+                    <td className="py-6 text-muted-foreground text-center" colSpan={8}>Loading projects...</td>
+                  </tr>
+                ) : projects.length === 0 ? (
+                  <tr>
+                    <td className="py-12 text-center text-muted-foreground" colSpan={8}>
+                      <p>No projects found.</p>
+                      <p className="text-xs mt-1">Upload a MyProject*.xlsx file to get started.</p>
+                    </td>
+                  </tr>
+                ) : totalProjectsCount === 0 ? (
+                  <tr>
+                    <td className="py-12 text-center text-muted-foreground" colSpan={8}>
+                      <p>No matching projects found for "{searchQuery}".</p>
+                    </td>
+                  </tr>
+                ) : (
+                  projects.map((project, idx) => {
+                    const progress = parseNumeric(project.percentage_progress) ?? 0;
+                    const pqiTime = parseNumeric(project.pqi_time);
+                    const pqiCost = parseNumeric(project.pqi_cost);
+                    return (
+                      <tr key={project.id || idx} className="border-b last:border-0 hover:bg-muted/20 transition-colors whitespace-nowrap">
+                        <td className="py-2 pr-3 font-medium">{project.project_id || "-"}</td>
+                        <td className="py-2 pr-3 font-medium max-w-[250px] truncate" title={project.project_name || ""}>{project.project_name || "-"}</td>
+                        <td className="py-2 pr-3 text-muted-foreground max-w-[150px] truncate" title={project.customer || ""}>{project.customer || "-"}</td>
+                        <td className="py-2 pr-3 text-muted-foreground max-w-[150px] truncate" title={project.project_manager || ""}>{project.project_manager || "-"}</td>
+                        <td className="py-2 pr-3">
+                          <span className="font-medium text-muted-foreground">{Number(progress.toFixed(2))}%</span>
+                        </td>
+                        <td className="py-2 pr-3">
+                          <span className={cn(
+                            "px-2 py-0.5 rounded-full text-[10px] font-medium border whitespace-nowrap",
+                            project.category === "FCC" && "bg-blue-100 text-blue-700 border-blue-200",
+                            project.category === "CSS" && "bg-purple-100 text-purple-700 border-purple-200",
+                            project.category === "UNCLASSIFIED" && "bg-slate-100 text-slate-700 border-slate-200"
+                          )} title={project.category_note || ""}>
+                            {project.category || "-"}
+                          </span>
+                        </td>
+                        <td className="py-2 text-center">
+                          {pqiTime != null ? (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div className="flex items-center justify-center cursor-pointer">
+                                  <div className={cn("h-4 w-4 rounded-full", getPqiTimeConfig(pqiTime).color)} />
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent side="top">
+                                <span className="font-semibold">{Number(pqiTime.toFixed(2))}%</span>
+                              </TooltipContent>
+                            </Tooltip>
+                          ) : (
+                            "-"
+                          )}
+                        </td>
+                        <td className="py-2 text-center">
+                          {pqiCost != null ? (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div className="flex items-center justify-center cursor-pointer">
+                                  <div className={cn("h-4 w-4 rounded-full", getPqiTimeConfig(pqiCost).color)} />
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent side="top">
+                                <span className="font-semibold">{Number(pqiCost.toFixed(2))}%</span>
+                              </TooltipContent>
+                            </Tooltip>
+                          ) : (
+                            "-"
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination Footer */}
+          {totalProjectsCount > 0 && (
+            <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 border-t pt-4">
+              <div className="flex items-center space-x-2">
+                <p className="text-sm font-medium text-muted-foreground">Rows per page</p>
+                <Select
+                  value={pageSize.toString()}
+                  onValueChange={(value) => setPageSize(Number(value))}
+                >
+                  <SelectTrigger className="h-8 w-[70px]">
+                    <SelectValue placeholder={pageSize} />
+                  </SelectTrigger>
+                  <SelectContent side="top">
+                    {[10, 25, 50, 100].map((size) => (
+                      <SelectItem key={size} value={size.toString()}>
+                        {size}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div className="flex items-center space-x-6 lg:space-x-8">
+                <div className="flex w-[100px] items-center justify-center text-sm font-medium text-muted-foreground">
+                  Page {currentPage} of {totalPages || 1}
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Button
+                    variant="outline"
+                    className="hidden h-8 w-8 p-0 lg:flex"
+                    onClick={() => setCurrentPage(1)}
+                    disabled={currentPage === 1}
+                  >
+                    <span className="sr-only">Go to first page</span>
+                    <ChevronsLeft className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="h-8 w-8 p-0"
+                    onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                    disabled={currentPage === 1}
+                  >
+                    <span className="sr-only">Go to previous page</span>
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="h-8 w-8 p-0"
+                    onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+                    disabled={currentPage === totalPages || totalPages === 0}
+                  >
+                    <span className="sr-only">Go to next page</span>
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="hidden h-8 w-8 p-0 lg:flex"
+                    onClick={() => setCurrentPage(totalPages)}
+                    disabled={currentPage === totalPages || totalPages === 0}
+                  >
+                    <span className="sr-only">Go to last page</span>
+                    <ChevronsRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
