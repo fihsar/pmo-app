@@ -609,7 +609,7 @@ export default function ProspectsPage() {
                   <SelectValue placeholder="Period" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="custom">Custom</SelectItem>
+                  <SelectItem value="custom">All Periods</SelectItem>
                   <div className="px-2 py-1.5 text-[10px] font-bold text-muted-foreground uppercase bg-muted/30">Quarterly</div>
                   <SelectItem value="q1">Q1</SelectItem>
                   <SelectItem value="q2">Q2</SelectItem>

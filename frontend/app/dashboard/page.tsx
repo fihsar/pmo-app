@@ -30,7 +30,6 @@ type Project = {
 
 type DashboardStatItem = { name: string; value: number };
 type DashboardBudgetItem = { name: string; budget: number; usage: number };
-type DashboardAchievementItem = { name: string; target: number; actual: number; percent: number };
 
 type DashboardStats = {
   total: number;
@@ -43,7 +42,6 @@ type DashboardStats = {
   pmData: DashboardStatItem[];
   catData: DashboardStatItem[];
   budgetData: DashboardBudgetItem[];
-  amAchievementData: DashboardAchievementItem[];
   totalGrossProfit: number;
 };
 
@@ -62,7 +60,6 @@ type DashboardSummaryRow = {
   pm_data: DashboardStatItem[] | null;
   cat_data: DashboardStatItem[] | null;
   budget_data: DashboardBudgetItem[] | null;
-  am_achievement_data: DashboardAchievementItem[] | null;
   total_gross_profit: number | string | null;
 };
 
@@ -163,7 +160,6 @@ const mapDashboardSummary = (row: DashboardSummaryRow): DashboardStats => {
     pmData: row.pm_data ?? [],
     catData: row.cat_data ?? [],
     budgetData: row.budget_data ?? [],
-    amAchievementData: row.am_achievement_data ?? [],
     totalGrossProfit: toNumber(row.total_gross_profit),
   };
 };
@@ -307,13 +303,13 @@ export default function DashboardPage() {
         usage:  Math.round((p.budget_usage  ?? 0) / 1_000_000),
       }));
 
-    const amAchievementData: DashboardAchievementItem[] = [];
+
     const totalGrossProfit = 0;
 
     return {
       total, avgProgress, avgPqiTime, avgPqiCost,
       pqiTimeData, pqiCostData,
-      progressData, pmData, catData, budgetData, amAchievementData, totalGrossProfit,
+      progressData, pmData, catData, budgetData, totalGrossProfit,
     };
   }, [projects]);
 
@@ -360,56 +356,6 @@ export default function DashboardPage() {
       )}
 
 
-      {/* Row 2: AM Achievement */}
-      {(loading || stats) && (
-        <section>
-          <Card className="border shadow-sm">
-            <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <TrendingUp className="h-4 w-4 text-indigo-500" /> 
-                  Sales Performance
-                </CardTitle>
-                <CardDescription>Invoiced vs Total Achievement (in Million IDR)</CardDescription>
-              </div>
-              {!loading && stats && stats.totalGrossProfit > 0 && (
-                <div className="text-left sm:text-right">
-                  <p className="text-xs uppercase tracking-wider text-muted-foreground font-medium mb-1">Total Gross Profit</p>
-                  <p className="text-2xl font-bold text-foreground">
-                    Rp {stats.totalGrossProfit.toLocaleString('id-ID', { maximumFractionDigits: 0 })}
-                  </p>
-                </div>
-              )}
-            </CardHeader>
-            <CardContent>
-              {loading ? <Skeleton className="h-80 w-full" /> : stats!.amAchievementData.length === 0 ? (
-                <p className="text-sm text-muted-foreground py-12 text-center">No project target data found for the latest batch.</p>
-              ) : (
-                <div className="h-[400px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={stats!.amAchievementData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
-                      <XAxis 
-                        dataKey="name" 
-                        interval={0} 
-                        angle={-45} 
-                        textAnchor="end" 
-                        height={80} 
-                        tick={{ fontSize: 10 }} 
-                      />
-                      <YAxis tick={{ fontSize: 10 }} label={{ value: 'Million IDR', angle: -90, position: 'insideLeft', fontSize: 10 }} />
-                      <Tooltip content={<ChartTooltip />} />
-                      <Legend verticalAlign="top" height={36}/>
-                      <Bar dataKey="target" name="Total Achievement" fill="#6366f1" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="actual" name="Invoiced" fill="#16a34a" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </section>
-      )}
 
       {/* Row 3: PQI Time + PQI Cost */}
       {(loading || stats) && (

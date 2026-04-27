@@ -10,13 +10,13 @@ The **PMO App** is a project management dashboard for PT Q2 Technologies. It tra
 - **Security:** Supabase Auth + Granular Role-Based Access Control (RBAC).
 
 ## 2. Core Architecture & Performance (April 2026 Update)
-The application has been refactored into a high-performance "Zero-Row" architecture.
+The application is primarily refactored toward a high-performance "Zero-Row" architecture.
 
-- **Zero-Row Dashboard:** The dashboard no longer downloads individual project or target records. All KPIs, AM Achievement charts, and Gross Profit totals are computed via the `get_dashboard_summary()` RPC on the server.
+- **Zero-Row Dashboard (Primary Path):** The dashboard uses `get_dashboard_summary()` RPC for KPI and aggregation data. If RPC fails, the UI falls back to row-based project fetches for local computation.
 - **Centralized Batch Metadata:** To eliminate expensive `MAX(batch_number)` scans, a `batch_metadata` table tracks the latest upload version for all data types. This is kept in sync via database triggers, providing O(1) version lookups.
 - **Server-Side Aggregations:** Both **Backlog** and **Prospects** pages now use dedicated RPCs (`get_backlog_subtotals`, `get_prospects_subtotals`) to compute global financial sums across the entire filtered dataset, rather than just the visible page.
 - **Search Debouncing:** A 500ms debounce is applied to all text searches to protect the database from query floods during typing.
-- **Latency Monitoring:** Every data fetch logs precise query latency (in ms) to the browser console for real-time performance telemetry.
+- **Latency Monitoring (Partial):** Query latency logs are implemented on major data-table pages (Projects, Prospects, Backlog, Sales Performance). Dashboard page fetches do not currently log latency in the same pattern.
 
 ## 3. Security & Access Control
 - **Role-Based Access Control (RBAC):** Implemented a granular Access Matrix in `frontend/app/dashboard/layout.tsx`.
@@ -24,7 +24,7 @@ The application has been refactored into a high-performance "Zero-Row" architect
     - **PM/AM/Admin:** Access to Projects, Prospects, and Backlog.
     - **Superadmin:** Full access, including User Management.
 - **Sidebar Integration:** The sidebar dynamically filters navigation items based on the user's assigned role.
-- **Server-Side Enforcement:** RBAC is reinforced at the RPC and API levels, ensuring users cannot access data outside their scope via direct queries.
+- **Current Data-Layer Status (Important):** Core table RLS policies are still broad for authenticated users (`USING (true)` patterns in schema SQL). Current RBAC behavior is strongest at UI/navigation and specific API-route checks (for example, user management endpoints), not full per-role row-level isolation across all datasets.
 
 ## 4. Backend Reorganization
 The Go backend has been restructured to resolve "multiple main() entrypoints" conflicts:
@@ -42,7 +42,7 @@ Standardized `go.mod` at the root ensures consistent dependency management.
 
 ### Projects & Prospects
 - **Server-Side Paging:** Handles thousands of rows with minimal memory footprint.
-- **Trigram Search:** Prospects table uses `pg_trgm` indexes for fast multi-field text search.
+- **Trigram Search:** Prospects table uses `pg_trgm` indexes on `prospect_name` and `client_name`. Global search also covers additional fields, but those are not all trigram-index accelerated.
 - **Ingestion-Time Classification:** Categories (FCC/CSS) are determined during upload and stored, though the UI can still re-classify on the fly if keywords change.
 
 ### Backlog (Project Targets)
@@ -73,3 +73,13 @@ Standardized `go.mod` at the root ensures consistent dependency management.
 - **Constants Location**: Keep static configuration (like AM lists or keyword patterns) **outside** component definitions to avoid re-render loops.
 - **RBAC Matrix**: Any new page must be registered in the `Access Matrix` in `frontend/app/dashboard/layout.tsx`.
 - **Latency Awareness**: Monitor the console logs for "Query latency" to detect performance regressions early.
+
+## 10. Recommended Next Architecture (Scalable + Secure)
+This section is a target recommendation, not a claim of current state.
+
+- **Enforce RBAC at Data Layer**: Implement role-aware RLS policies on `projects`, `project_targets`, and `prospects` using role mappings from `profiles` (or equivalent source of truth), so direct client queries cannot bypass authorization.
+- **Constrain SECURITY DEFINER RPCs**: For each RPC, explicitly validate caller context/role and AM scope before returning rows/aggregates.
+- **Use Server-Only Data Access for Sensitive Paths**: Move sensitive reads/writes to server routes/actions with explicit authorization checks; avoid relying only on client-side navigation gating.
+- **Keep O(1) Batch Discovery**: Continue using `batch_metadata` + `get_latest_batch()` as the canonical latest-batch lookup strategy.
+- **Standardize Telemetry**: Add a shared data-fetch utility to capture latency and error metrics consistently across all pages (including Dashboard).
+- **Performance by Default**: Prefer paginated fetch + RPC aggregate split for large datasets; avoid full-table client hydration in normal flows.

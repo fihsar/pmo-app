@@ -45,6 +45,7 @@ const menuItems: MenuItem[] = [
     icon: LayoutDashboard,
     subItems: [
       { href: "/dashboard", label: "Project Dashboard" }, // All roles
+      { href: "/dashboard/sales-performance", label: "Sales Performance", allowedRoles: ["Superadmin", "Project Manager", "Project Administrator", "Account Manager"] },
       { href: "/dashboard/prospects", label: "List of Prospects", allowedRoles: ["Superadmin", "Project Manager", "Project Administrator", "Account Manager"] },
       { href: "/dashboard/projects", label: "List of Projects", allowedRoles: ["Superadmin", "Project Manager", "Project Administrator", "Account Manager"] },
       { href: "/dashboard/backlog", label: "Backlog", allowedRoles: ["Superadmin", "Project Manager", "Project Administrator", "Account Manager"] },
