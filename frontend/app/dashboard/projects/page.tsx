@@ -5,7 +5,12 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowUpDown, ArrowUp, ArrowDown, Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Clock, Upload } from "lucide-react";
+import { 
+  ArrowUpDown, ArrowUp, ArrowDown, Search, ChevronLeft, 
+  ChevronRight, ChevronsLeft, ChevronsRight, Clock, Upload,
+  Download, AlertCircle, Inbox, FolderKanban
+} from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import * as XLSX from "xlsx";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -419,19 +424,89 @@ export default function ProjectsPage() {
             throw new Error(`Failed to save to database. Note: You need to run the updated SQL script to create the 55-column 'projects' table first! Details: ${insertError.message}`);
           }
         }
-        setSuccess(`Successfully imported and saved ${newProjects.length} projects in batch ${nextBatch}!`);
+        setSuccess(`Successfully imported and saved ${newProjects.length} projects in batch ${nextBatch} using ${file.name}!`);
 
         await loadProjects();
       } else {
         // Just show them locally if no supabase
         setProjects((prev) => [...newProjects, ...prev]);
-        setSuccess(`Loaded ${newProjects.length} projects locally.`);
+        setSuccess(`Loaded ${newProjects.length} projects locally from ${file.name}.`);
       }
     } catch (err: any) {
       setError(err.message || "Failed to parse Excel file.");
     } finally {
       setLoading(false);
       e.target.value = ""; // Reset input
+    }
+  };
+
+  const handleExport = async () => {
+    if (!isSupabaseConfigured || loading) return;
+    setLoading(true);
+    setError("");
+    setSuccess("");
+    
+    try {
+      const { data: maxBatchData } = await supabase
+        .from("projects")
+        .select("batch_number")
+        .order("batch_number", { ascending: false })
+        .limit(1);
+        
+      const maxBatch = maxBatchData && maxBatchData.length > 0 ? maxBatchData[0].batch_number : 0;
+      if (maxBatch === 0) {
+        setError("No data found to export.");
+        setLoading(false);
+        return;
+      }
+
+      let query = supabase.from("projects").select("*").eq("batch_number", maxBatch);
+
+      if (searchQuery.trim()) {
+        const q = searchQuery.trim().replace(/,/g, " ");
+        query = query.or(`project_id.ilike.%${q}%,customer.ilike.%${q}%,project_name.ilike.%${q}%,project_manager.ilike.%${q}%,account_manager.ilike.%${q}%`);
+      }
+
+      if (categoryFilter !== "all") {
+        if (categoryFilter === "UNCLASSIFIED") query = query.or("category.eq.UNCLASSIFIED,category.is.null,category.eq.");
+        else query = query.eq("category", categoryFilter);
+      }
+
+      const { data, error: exportError } = await query.order("project_id", { ascending: true });
+      if (exportError) throw exportError;
+
+      if (!data || data.length === 0) {
+        setError("No matching data found to export.");
+        setLoading(false);
+        return;
+      }
+
+      const exportData = data.map(p => ({
+        'PROJECT_ID': p.project_id,
+        'CUSTOMER': p.customer,
+        'PROJECT_NAME': p.project_name,
+        'PROJECT_MANAGER': p.project_manager,
+        'ACCOUNT_MANAGER': p.account_manager,
+        'PCS_STATUS': p.pcs_status,
+        'PROJECT_CATEGORY': p.project_category,
+        'SCHEDULE_HEALTH': p.schedule_health,
+        'FINANCIAL_HEALTH': p.financial_health,
+        'TOTAL_SALES': p.total_sales,
+        'GROSS_PROFIT': p.gross_profit,
+        'PERCENTAGE_PROGRESS': p.percentage_progress,
+        'CATEGORY': p.category,
+        'CATEGORY_NOTE': p.category_note
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Projects");
+      XLSX.writeFile(wb, `Projects_Export_${new Date().toISOString().split('T')[0]}.xlsx`);
+      setSuccess(`Successfully exported ${data.length} projects!`);
+    } catch (err: any) {
+      setError(`Export failed: ${err.message}`);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -496,6 +571,15 @@ export default function ProjectsPage() {
               />
             </label>
           </Button>
+          <Button 
+            variant="default" 
+            className="flex items-center gap-2" 
+            onClick={handleExport}
+            disabled={loading || totalProjectsCount === 0}
+          >
+            <Download className="h-4 w-4" />
+            Export Data
+          </Button>
         </div>
       </div>
 
@@ -539,31 +623,52 @@ export default function ProjectsPage() {
               <thead>
                 <tr className="border-b text-left text-muted-foreground whitespace-nowrap">
                   {renderSortableHeader("PID", "project_id")}
-                  {renderSortableHeader("Project Name", "project_name")}
-                  {renderSortableHeader("Customer", "customer")}
-                  {renderSortableHeader("Project Manager", "project_manager", undefined, "left", "min-w-[200px] whitespace-nowrap")}
+                  {renderSortableHeader("Project Name", "project_name", undefined, "left", "min-w-[400px]")}
+                  {renderSortableHeader("Customer", "customer", undefined, "left", "min-w-[250px]")}
+                  {renderSortableHeader("Project Manager", "project_manager", undefined, "left", "min-w-[120px] whitespace-nowrap")}
                   {renderSortableHeader("Progress", "percentage_progress")}
-                  {renderSortableHeader("Category", "category")}
+                  {renderSortableHeader("Category", "category", undefined, "center")}
                   {renderSortableHeader("Time", "pqi_time", "PQI TIME", "center")}
                   {renderSortableHeader("Cost", "pqi_cost", "PQI COST", "center")}
                 </tr>
               </thead>
               <tbody>
                 {loading && projects.length === 0 ? (
-                  <tr>
-                    <td className="py-6 text-muted-foreground text-center" colSpan={8}>Loading projects...</td>
-                  </tr>
+                  Array.from({ length: 10 }).map((_, i) => (
+                    <tr key={i} className="border-b last:border-0">
+                      {Array.from({ length: 8 }).map((_, j) => (
+                        <td key={j} className="py-4 pr-3">
+                          <Skeleton className="h-4 w-full" />
+                        </td>
+                      ))}
+                    </tr>
+                  ))
                 ) : projects.length === 0 ? (
                   <tr>
-                    <td className="py-12 text-center text-muted-foreground" colSpan={8}>
-                      <p>No projects found.</p>
-                      <p className="text-xs mt-1">Upload a MyProject*.xlsx file to get started.</p>
+                    <td className="py-24 text-center text-muted-foreground" colSpan={8}>
+                      <div className="flex flex-col items-center justify-center gap-3">
+                        <div className="rounded-full bg-muted p-4">
+                          <Inbox className="h-8 w-8 text-muted-foreground/40" />
+                        </div>
+                        <div>
+                          <p className="font-medium text-foreground">No projects found</p>
+                          <p className="text-xs">Upload a project report to get started.</p>
+                        </div>
+                      </div>
                     </td>
                   </tr>
                 ) : totalProjectsCount === 0 ? (
                   <tr>
-                    <td className="py-12 text-center text-muted-foreground" colSpan={8}>
-                      <p>No matching projects found for "{searchQuery}".</p>
+                    <td className="py-24 text-center text-muted-foreground" colSpan={8}>
+                      <div className="flex flex-col items-center justify-center gap-3">
+                        <div className="rounded-full bg-muted p-4">
+                          <Search className="h-8 w-8 text-muted-foreground/40" />
+                        </div>
+                        <div>
+                          <p className="font-medium text-foreground">No matches found</p>
+                          <p className="text-xs">Try adjusting your filters or search query.</p>
+                        </div>
+                      </div>
                     </td>
                   </tr>
                 ) : (
@@ -574,21 +679,23 @@ export default function ProjectsPage() {
                     return (
                       <tr key={project.id || idx} className="border-b last:border-0 hover:bg-muted/20 transition-colors whitespace-nowrap">
                         <td className="py-2 pr-3 font-medium">{project.project_id || "-"}</td>
-                        <td className="py-2 pr-3 font-medium max-w-[250px] truncate" title={project.project_name || ""}>{project.project_name || "-"}</td>
-                        <td className="py-2 pr-3 text-muted-foreground max-w-[150px] truncate" title={project.customer || ""}>{project.customer || "-"}</td>
-                        <td className="py-2 pr-3 text-muted-foreground max-w-[150px] truncate" title={project.project_manager || ""}>{project.project_manager || "-"}</td>
+                        <td className="py-2 pr-3 font-medium max-w-[400px] truncate" title={project.project_name || ""}>{project.project_name || "-"}</td>
+                        <td className="py-2 pr-3 text-muted-foreground max-w-[250px] truncate" title={project.customer || ""}>{project.customer || "-"}</td>
+                        <td className="py-2 pr-3 text-muted-foreground max-w-[120px] truncate" title={project.project_manager || ""}>{project.project_manager || "-"}</td>
                         <td className="py-2 pr-3">
                           <span className="font-medium text-muted-foreground">{Number(progress.toFixed(2))}%</span>
                         </td>
-                        <td className="py-2 pr-3">
-                          <span className={cn(
-                            "px-2 py-0.5 rounded-full text-[10px] font-medium border whitespace-nowrap",
-                            project.category === "FCC" && "bg-blue-100 text-blue-700 border-blue-200",
-                            project.category === "CSS" && "bg-purple-100 text-purple-700 border-purple-200",
-                            project.category === "UNCLASSIFIED" && "bg-slate-100 text-slate-700 border-slate-200"
-                          )} title={project.category_note || ""}>
-                            {project.category || "-"}
-                          </span>
+                        <td className="py-2 text-center">
+                          <div className="flex justify-center">
+                            <span className={cn(
+                              "px-2 py-0.5 rounded-full text-[10px] font-medium border whitespace-nowrap",
+                              project.category === "FCC" && "bg-blue-100 text-blue-700 border-blue-200",
+                              project.category === "CSS" && "bg-purple-100 text-purple-700 border-purple-200",
+                              project.category === "UNCLASSIFIED" && "bg-slate-100 text-slate-700 border-slate-200"
+                            )} title={project.category_note || ""}>
+                              {project.category || "-"}
+                            </span>
+                          </div>
                         </td>
                         <td className="py-2 text-center">
                           {pqiTime != null ? (

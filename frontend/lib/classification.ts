@@ -11,6 +11,11 @@ const STRICT_FCC_KEYWORDS = [
   "cimb bank berhad",
   "cimb bank berhard",
   "garuda",
+  "virtual account",
+  "va bni",
+  "va bri",
+  "va mandiri",
+  "va bca",
 ];
 
 const STRICT_CSS_KEYWORDS = [
@@ -20,6 +25,11 @@ const STRICT_CSS_KEYWORDS = [
   "vulnerability",
   "phishing",
   "powertech",
+  "data loss prevention",
+  "dlp",
+  "forcepoint",
+  "fazpass",
+  "ciphertrust",
 ];
 
 const FCC_KEYWORDS = [
@@ -107,6 +117,8 @@ const FCC_KEYWORDS = [
   "enhancement swift release mx",
   "correspondent banking",
   "cimb berhad fa",
+  "cimb berhad",
+  "book of octo",
   "renewal ifmx",
 ];
 
@@ -136,6 +148,8 @@ const CSS_KEYWORDS = [
   "audit it",
   "audit governance",
   "audit surveillance",
+  "audit",
+  "proxy",
   "iso 27001",
   "iso27001",
   "resertifikasi",
@@ -170,11 +184,8 @@ const CSS_KEYWORDS = [
   "waf",
   "cwaf",
   "firewall",
-  "dlp",
-  "forcepoint",
   "dspm",
   "dynatrace",
-  "proxy",
   "hcl bigfix",
   "hcl",
   "microfocus fortify",
@@ -249,14 +260,24 @@ function hasKeyword(text: string, keywords: string[]): boolean {
 }
 
 export function determineCategory(row: Record<string, unknown>): CategoryResult {
+  const existingCategory = String(readFirst(row, ["category", "CATEGORY", "project_category"]) || "");
   const name = normalizeText(readFirst(row, ["PROJECT_NAME", "PROSPECT_NAME", "project_name", "prospect_name"]));
 
+  // 1. Strict Overrides (Highest priority)
   if (hasKeyword(name, STRICT_FCC_KEYWORDS)) {
     return { category: "FCC", category_note: "strict-override" };
   }
 
   if (hasKeyword(name, STRICT_CSS_KEYWORDS)) {
     return { category: "CSS", category_note: "strict-override" };
+  }
+
+  // 2. Trust already classified data from DB if it's not UNCLASSIFIED
+  if (existingCategory === "FCC" || existingCategory === "CSS") {
+    return { 
+      category: existingCategory as Category, 
+      category_note: (row["category_note"] as any) || "col-based" 
+    };
   }
 
   const sales3sw = readNumeric(row, ["SALES_3SW", "sales_3sw"]);

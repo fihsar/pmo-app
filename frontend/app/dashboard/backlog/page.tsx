@@ -5,11 +5,16 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowUpDown, ArrowUp, ArrowDown, Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Upload } from "lucide-react";
+import { 
+  ArrowUpDown, ArrowUp, ArrowDown, Search, ChevronLeft, 
+  ChevronRight, ChevronsLeft, ChevronsRight, Upload, Download, Inbox 
+} from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import * as XLSX from "xlsx";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { Checkbox } from "@/components/ui/checkbox";
+import { determineCategory } from "@/lib/classification";
 
 type ProjectTarget = {
   id?: string;
@@ -92,30 +97,7 @@ const formatDate = (dateStr: string | null): string => {
   return dateStr;
 };
 
-const determineCategory = (row: any) => {
-  const col_FCC = parseNumeric(row["OPR&DEL-OPR&DEL-Financial Crime Compliance"]) || 0;
-  const col_CSS = parseNumeric(row["OPR&DEL-OPR&DEL-Cyber Security Services"]) || 0;
-
-  if (col_FCC !== 0 && col_CSS === 0) return { category: "FCC", category_note: "col-based" };
-  if (col_CSS !== 0 && col_FCC === 0) return { category: "CSS", category_note: "col-based" };
-  if (col_FCC !== 0 && col_CSS !== 0) return { category: "CSS", category_note: "split" };
-
-  const projectName = String(row["PROJECT_NAME"] || "").toLowerCase().replace(/[\s\u00A0]+/g, ' ').trim();
-  
-  const fccKeywords = ["aml", "fraud", "actimize", "wlf", "sam9", "barista", "gro", "tcj", "mcca", "rpp", "paynet", "corporate fraud", "fds", "anti-money laundering", "gowap", "ifmx", "garuda"];
-  const cssKeywords = ["pentest", "penetration", "vapt", "soc", "siem", "audit it", "iso 27001", "iso27001", "bigfix", "nessus", "fortify", "sast", "sca", "vulnerability", "burp", "hardening", "resertifikasi", "certif", "cyber", "uem", "license nessus", "iam", "identity access", "managed service", "identity and access", "identity & access", "hcl", "bussan auto finance", "va", "va bulk", "project manager bau", "privileged access management"];
-  const hasKeyword = (keywords: string[]) =>
-    keywords.some((kw) => {
-      if (kw === "va") return /\bva\b/.test(projectName);
-      return projectName.includes(kw);
-    });
-
-  // Ensure all keywords are lowercase and check for matches
-  if (hasKeyword(fccKeywords.map(k => k.toLowerCase()))) return { category: "FCC", category_note: "keyword-based" };
-  if (hasKeyword(cssKeywords.map(k => k.toLowerCase()))) return { category: "CSS", category_note: "keyword-based" };
-
-  return { category: "UNCLASSIFIED", category_note: "manual-review" };
-};
+// Classification logic is now imported from @/lib/classification
 
 export default function ProjectTargetPage() {
   const [targets, setTargets] = useState<ProjectTarget[]>([]);
@@ -187,7 +169,8 @@ export default function ProjectTargetPage() {
       let query = supabase
         .from("project_targets")
         .select("id, target_id, company_name, project_id, customer, project_name, project_manager, account_manager, term_of_payment_sales, invoice_status, project_category, project_tracking, total, gp_acc, client_po_date, invoice_number, invoice_date, payment_date, target_date, target_invoice_r0, aging_invoice, count_target_change, last_update, status, category, category_note, batch_number, created_at", { count: "exact" })
-        .eq("batch_number", maxBatch);
+        .eq("batch_number", maxBatch)
+        .or("invoice_date.is.null,invoice_date.lt.2025-01-01,invoice_date.gte.2026-01-01");
 
       if (searchQuery.trim()) {
         const q = escapeSearch(searchQuery);
@@ -218,7 +201,15 @@ export default function ProjectTargetPage() {
       }
 
       if (categoryFilter !== "all") {
-        query = query.eq("category", categoryFilter);
+        if (categoryFilter === "CSS") {
+          query = query.eq("category", "CSS");
+        } else if (categoryFilter === "FCC") {
+          query = query.eq("category", "FCC");
+        } else if (categoryFilter === "UNCLASSIFIED") {
+          query = query.or("category.eq.UNCLASSIFIED,category.is.null,category.eq.");
+        } else {
+          query = query.eq("category", categoryFilter);
+        }
       }
 
       const { data, error, count } = await query
@@ -229,7 +220,8 @@ export default function ProjectTargetPage() {
       let aggregateQuery = supabase
         .from("project_targets")
         .select("total, gp_acc")
-        .eq("batch_number", maxBatch);
+        .eq("batch_number", maxBatch)
+        .or("invoice_date.is.null,invoice_date.lt.2025-01-01,invoice_date.gte.2026-01-01");
 
       if (searchQuery.trim()) {
         const q = escapeSearch(searchQuery);
@@ -260,7 +252,15 @@ export default function ProjectTargetPage() {
       }
 
       if (categoryFilter !== "all") {
-        aggregateQuery = aggregateQuery.eq("category", categoryFilter);
+        if (categoryFilter === "CSS") {
+          aggregateQuery = aggregateQuery.eq("category", "CSS");
+        } else if (categoryFilter === "FCC") {
+          aggregateQuery = aggregateQuery.eq("category", "FCC");
+        } else if (categoryFilter === "UNCLASSIFIED") {
+          aggregateQuery = aggregateQuery.or("category.eq.UNCLASSIFIED,category.is.null,category.eq.");
+        } else {
+          aggregateQuery = aggregateQuery.eq("category", categoryFilter);
+        }
       }
 
       const { data: aggregateData, error: aggregateError } = await aggregateQuery;
@@ -402,7 +402,7 @@ export default function ProjectTargetPage() {
 
       if (!isSupabaseConfigured) {
         setTargets(newTargets);
-        setSuccess("Loaded from Excel (Local State Only - Supabase not connected).");
+        setSuccess(`Loaded from Excel locally using ${file.name} (Supabase not connected).`);
         setLoading(false);
         return;
       }
@@ -429,7 +429,7 @@ export default function ProjectTargetPage() {
         if (insertError) throw insertError;
       }
 
-      setSuccess(`Successfully uploaded ${newTargets.length} project targets!`);
+      setSuccess(`Successfully uploaded ${newTargets.length} project targets using ${file.name}!`);
       await loadTargets();
     } catch (err: any) {
       console.error(err);
@@ -438,6 +438,107 @@ export default function ProjectTargetPage() {
       setLoading(false);
       // Reset input
       e.target.value = '';
+    }
+  };
+
+  const handleExport = async () => {
+    if (!isSupabaseConfigured || loading) return;
+    setLoading(true);
+    setError("");
+    setSuccess("");
+    
+    try {
+      // Fetch current max batch
+      const { data: maxBatchData } = await supabase
+        .from("project_targets")
+        .select("batch_number")
+        .order("batch_number", { ascending: false })
+        .limit(1);
+        
+      const maxBatch = maxBatchData && maxBatchData.length > 0 ? maxBatchData[0].batch_number : 0;
+      
+      if (maxBatch === 0) {
+        setError("No data found to export.");
+        setLoading(false);
+        return;
+      }
+
+      // Fetch all targets for the current filters (without pagination)
+      let query = supabase
+        .from("project_targets")
+        .select("*")
+        .eq("batch_number", maxBatch)
+        .or("invoice_date.is.null,invoice_date.lt.2025-01-01,invoice_date.gte.2026-01-01");
+
+      // Apply search/filters
+      if (searchQuery.trim()) {
+        const q = escapeSearch(searchQuery);
+        query = query.or(
+          [
+            `project_id.ilike.%${q}%`,
+            `customer.ilike.%${q}%`,
+            `project_name.ilike.%${q}%`,
+            `project_manager.ilike.%${q}%`,
+            `account_manager.ilike.%${q}%`,
+            `term_of_payment_sales.ilike.%${q}%`,
+            `category.ilike.%${q}%`,
+            `status.ilike.%${q}%`,
+          ].join(",")
+        );
+      }
+
+      if (startDate) query = query.gte("target_date", startDate);
+      if (endDate) query = query.lte("target_date", endDate);
+      if (invoiceDateEmpty) query = query.is("invoice_date", null);
+
+      if (categoryFilter !== "all") {
+        if (categoryFilter === "CSS") query = query.eq("category", "CSS");
+        else if (categoryFilter === "FCC") query = query.eq("category", "FCC");
+        else if (categoryFilter === "UNCLASSIFIED") query = query.or("category.eq.UNCLASSIFIED,category.is.null,category.eq.");
+        else query = query.eq("category", categoryFilter);
+      }
+
+      const { data, error: exportError } = await query.order("target_date", { ascending: true });
+
+      if (exportError) throw exportError;
+
+      if (!data || data.length === 0) {
+        setError("No matching data found to export.");
+        setLoading(false);
+        return;
+      }
+
+      // Map to Excel rows with requested headers
+      const exportData = data.map(t => ({
+        'PROJECT_ID': t.project_id,
+        'CUSTOMER': t.customer,
+        'PROJECT_NAME': t.project_name,
+        'PROJECT_MANAGER': t.project_manager,
+        'ACCOUNT_MANAGER': t.account_manager,
+        'TERM_OF_PAYMENT_SALES': t.term_of_payment_sales,
+        'PROJECT_CATEGORY': t.project_category,
+        'PROJECT_TRACKING': t.project_tracking,
+        'TOTAL': t.total,
+        'GP_ACC': t.gp_acc,
+        'INVOICE_NUMBER': t.invoice_number,
+        'INVOICE_DATE': t.invoice_date,
+        'PAYMENT_DATE': t.payment_date,
+        'TARGET_DATE': t.target_date,
+        'CATEGORY': t.category,
+        'STATUS': t.status || 'On Track'
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Backlog");
+      XLSX.writeFile(wb, `Backlog_Export_${new Date().toISOString().split('T')[0]}.xlsx`);
+      
+      setSuccess(`Successfully exported ${data.length} records to Excel!`);
+    } catch (err: any) {
+      console.error(err);
+      setError(`Export failed: ${err.message}`);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -458,15 +559,19 @@ export default function ProjectTargetPage() {
 
   const totalPages = Math.ceil(totalTargetsCount / pageSize);
 
-  const renderSortableHeader = (label: React.ReactNode, key: keyof ProjectTarget, title?: string) => {
+  const renderSortableHeader = (label: React.ReactNode, key: keyof ProjectTarget, title?: string, align: "left" | "center" = "left") => {
     const isActive = sortConfig?.key === key;
     return (
       <th 
-        className="py-2 pr-3 font-medium cursor-pointer hover:text-foreground select-none group" 
+        className={cn(
+          "py-2 pr-3 font-medium cursor-pointer hover:text-foreground select-none group",
+          align === "center" && "text-center pr-0"
+        )} 
         onClick={() => handleSort(key)}
         title={title}
       >
-        <div className="flex items-center gap-1">
+        <div className={cn("flex items-center gap-1", align === "center" && "justify-center")}>
+          {align === "center" && <div className="w-3.5" />} {/* Spacer for balance */}
           {label}
           {isActive ? (
             sortConfig.direction === "asc" ? (
@@ -504,27 +609,26 @@ export default function ProjectTargetPage() {
               />
             </label>
           </Button>
+          <Button 
+            variant="default" 
+            className="flex items-center gap-2" 
+            onClick={handleExport}
+            disabled={loading || totalTargetsCount === 0}
+          >
+            <Download className="h-4 w-4" />
+            Export Data
+          </Button>
         </div>
       </div>
 
-      {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-600 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-400">
-          {error}
-        </div>
-      )}
-      
-      {success && (
-        <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-600 dark:border-green-900/50 dark:bg-green-900/20 dark:text-green-400">
-          {success}
-        </div>
-      )}
-
       <Card className="border shadow-sm">
-        <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4">
+        <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-2 sm:space-y-0">
           <div>
-            <CardTitle>Target Database</CardTitle>
+            <CardTitle>All Backlog</CardTitle>
             <CardDescription>
-              {totalTargetsCount} {totalTargetsCount === 1 ? 'target' : 'targets'} found
+              {error && <span className="text-destructive font-medium block mt-1">{error}</span>}
+              {success && <span className="text-green-600 dark:text-green-400 font-medium block mt-1">{success}</span>}
+              {totalTargetsCount > 0 && <span className="block mt-1">Showing {targets.length} of {totalTargetsCount} targets</span>}
             </CardDescription>
           </div>
           <div className="flex flex-col md:flex-row items-center gap-3">
@@ -635,26 +739,47 @@ export default function ProjectTargetPage() {
                   {renderSortableHeader("Revenue", "total")}
                   {renderSortableHeader("Gross Profit", "gp_acc")}
                   {renderSortableHeader("Target Date", "target_date")}
-                  {renderSortableHeader("Category", "category")}
-                  {renderSortableHeader("Status", "status")}
+                  {renderSortableHeader("Category", "category", undefined, "center")}
+                  {renderSortableHeader("Status", "status", undefined, "center")}
                 </tr>
               </thead>
               <tbody>
                 {loading && targets.length === 0 ? (
-                  <tr>
-                    <td className="py-6 text-muted-foreground text-center" colSpan={9}>Loading targets...</td>
-                  </tr>
+                  Array.from({ length: 10 }).map((_, i) => (
+                    <tr key={i} className="border-b last:border-0">
+                      {Array.from({ length: 11 }).map((_, j) => (
+                        <td key={j} className="py-4 pr-3">
+                          <Skeleton className="h-4 w-full" />
+                        </td>
+                      ))}
+                    </tr>
+                  ))
                 ) : targets.length === 0 ? (
                   <tr>
-                    <td className="py-12 text-center text-muted-foreground" colSpan={9}>
-                      <p>No project targets found.</p>
-                      <p className="text-xs mt-1">Upload a Project_Target*.xlsx file to get started.</p>
+                    <td className="py-24 text-center text-muted-foreground" colSpan={11}>
+                      <div className="flex flex-col items-center justify-center gap-3">
+                        <div className="rounded-full bg-muted p-4">
+                          <Inbox className="h-8 w-8 text-muted-foreground/40" />
+                        </div>
+                        <div>
+                          <p className="font-medium text-foreground">No backlog found</p>
+                          <p className="text-xs">Upload a project target file to get started.</p>
+                        </div>
+                      </div>
                     </td>
                   </tr>
                 ) : totalTargetsCount === 0 ? (
                   <tr>
-                    <td className="py-12 text-center text-muted-foreground" colSpan={9}>
-                      <p>No matching targets found for "{searchQuery}".</p>
+                    <td className="py-24 text-center text-muted-foreground" colSpan={11}>
+                      <div className="flex flex-col items-center justify-center gap-3">
+                        <div className="rounded-full bg-muted p-4">
+                          <Search className="h-8 w-8 text-muted-foreground/40" />
+                        </div>
+                        <div>
+                          <p className="font-medium text-foreground">No matches found</p>
+                          <p className="text-xs">Try adjusting your filters or search query.</p>
+                        </div>
+                      </div>
                     </td>
                   </tr>
                 ) : (
@@ -674,35 +799,39 @@ export default function ProjectTargetPage() {
                           {target.gp_acc != null ? `Rp ${target.gp_acc.toLocaleString('id-ID', { maximumFractionDigits: 0 })}` : "-"}
                         </td>
                         <td className="py-2 pr-3 text-muted-foreground">{formatDate(target.target_date)}</td>
-                        <td className="py-2 pr-3">
-                          <span className={cn(
-                            "px-2 py-0.5 rounded-full text-[10px] font-medium border whitespace-nowrap",
-                            target.category === "FCC" && "bg-blue-100 text-blue-700 border-blue-200",
-                            target.category === "CSS" && "bg-purple-100 text-purple-700 border-purple-200",
-                            target.category === "UNCLASSIFIED" && "bg-slate-100 text-slate-700 border-slate-200"
-                          )} title={target.category_note || ""}>
-                            {target.category || "-"}
-                          </span>
+                        <td className="py-2 text-center">
+                          <div className="flex justify-center">
+                            <span className={cn(
+                              "px-2 py-0.5 rounded-full text-[10px] font-medium border whitespace-nowrap",
+                              target.category === "FCC" && "bg-blue-100 text-blue-700 border-blue-200",
+                              target.category === "CSS" && "bg-purple-100 text-purple-700 border-purple-200",
+                              target.category === "UNCLASSIFIED" && "bg-slate-100 text-slate-700 border-slate-200"
+                            )} title={target.category_note || ""}>
+                              {target.category || "-"}
+                            </span>
+                          </div>
                         </td>
-                        <td className="py-2 pr-3">
-                          <Select 
-                            value={target.status || "On Track"} 
-                            onValueChange={(val) => updateStatus(target.id, val)}
-                          >
-                            <SelectTrigger className={cn(
-                              "!h-auto !py-0.5 !px-2 !rounded-full !justify-center text-[10px] font-medium border shadow-none w-fit whitespace-nowrap focus:ring-0 focus:ring-offset-0 hover:opacity-80 transition-opacity [&>svg]:hidden",
-                              (!target.status || target.status === "On Track") && "bg-green-100 text-green-700 border-green-200",
-                              target.status === "At Risk" && "bg-amber-100 text-amber-700 border-amber-200",
-                              target.status === "Delayed" && "bg-red-100 text-red-700 border-red-200"
-                            )}>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="On Track" className="text-green-600 font-medium text-xs">On Track</SelectItem>
-                              <SelectItem value="At Risk" className="text-amber-600 font-medium text-xs">At Risk</SelectItem>
-                              <SelectItem value="Delayed" className="text-red-600 font-medium text-xs">Delayed</SelectItem>
-                            </SelectContent>
-                          </Select>
+                        <td className="py-2 text-center">
+                          <div className="flex justify-center">
+                            <Select 
+                              value={target.status || "On Track"} 
+                              onValueChange={(val) => updateStatus(target.id, val)}
+                            >
+                              <SelectTrigger className={cn(
+                                "!h-auto !py-0.5 !px-2 !rounded-full !justify-center text-[10px] font-medium border shadow-none w-fit whitespace-nowrap focus:ring-0 focus:ring-offset-0 hover:opacity-80 transition-opacity [&>svg]:hidden",
+                                (!target.status || target.status === "On Track") && "bg-green-100 text-green-700 border-green-200",
+                                target.status === "At Risk" && "bg-amber-100 text-amber-700 border-amber-200",
+                                target.status === "Delayed" && "bg-red-100 text-red-700 border-red-200"
+                              )}>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="On Track" className="text-green-600 font-medium text-xs">On Track</SelectItem>
+                                <SelectItem value="At Risk" className="text-amber-600 font-medium text-xs">At Risk</SelectItem>
+                                <SelectItem value="Delayed" className="text-red-600 font-medium text-xs">Delayed</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
                         </td>
                       </tr>
                     );

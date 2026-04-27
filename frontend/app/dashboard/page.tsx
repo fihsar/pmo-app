@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import {
   FolderKanban, TrendingUp, Clock, DollarSign, UploadCloud,
-  AlertTriangle, CheckCircle2, Activity
+  Activity
 } from "lucide-react";
 import {
   PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
@@ -45,8 +45,6 @@ type DashboardStats = {
   avgPqiCost: number;
   pqiTimeData: DashboardStatItem[];
   pqiCostData: DashboardStatItem[];
-  schedData: DashboardStatItem[];
-  finData: DashboardStatItem[];
   progressData: Array<{ name: string; count: number }>;
   pmData: DashboardStatItem[];
   catData: DashboardStatItem[];
@@ -54,6 +52,8 @@ type DashboardStats = {
   amAchievementData: DashboardAchievementItem[];
   totalGrossProfit: number;
 };
+
+const TARGET_GROSS_PROFIT = 36_000_000_000;
 
 type DashboardSummaryRow = {
   total: number | string | null;
@@ -71,6 +71,36 @@ type DashboardSummaryRow = {
   am_achievement_data: DashboardAchievementItem[] | null;
   total_gross_profit: number | string | null;
 };
+
+function buildAmAchievementData(targets: ProjectTarget[]): DashboardAchievementItem[] {
+  const amMap: Record<string, { target: number; actual: number }> = {};
+
+  targets.forEach((t) => {
+    // Exclude 2025 achievement rows from both target and invoiced values.
+    if (t.invoice_date && t.invoice_date.startsWith("2025")) return;
+
+    const am = t.account_manager?.trim() || "Unknown";
+    if (!amMap[am]) amMap[am] = { target: 0, actual: 0 };
+
+    const val = Number(t.gp_acc) || 0;
+    amMap[am].target += val;
+
+    // Match backlog default behavior: include as invoiced when invoice_date is not empty.
+    if (t.invoice_date && t.invoice_date.trim() !== "") {
+      amMap[am].actual += val;
+    }
+  });
+
+  return Object.entries(amMap)
+    .map(([name, vals]) => ({
+      name,
+      target: Math.round(vals.target / 1_000_000),
+      actual: Math.round(vals.actual / 1_000_000),
+      percent: vals.target > 0 ? Math.round((vals.actual / vals.target) * 100) : 0,
+    }))
+    .filter((item) => item.target > 0)
+    .sort((a, b) => b.target - a.target);
+}
 
 // ── Color helpers ──────────────────────────────────────────────────────────────
 const PQI_COLORS = {
@@ -158,8 +188,6 @@ const mapDashboardSummary = (row: DashboardSummaryRow): DashboardStats => {
     avgPqiCost: toNumber(row.avg_pqi_cost),
     pqiTimeData: row.pqi_time_data ?? [],
     pqiCostData: row.pqi_cost_data ?? [],
-    schedData: row.sched_data ?? [],
-    finData: row.fin_data ?? [],
     progressData: row.progress_data ?? [],
     pmData: row.pm_data ?? [],
     catData: row.cat_data ?? [],
@@ -180,37 +208,20 @@ export default function DashboardPage() {
     const fetchData = async () => {
       if (!isSupabaseConfigured) { setLoading(false); return; }
 
+      let rpcSummary: DashboardSummaryRow | null = null;
+
       try {
         const { data: summaryData, error: summaryError } = await supabase.rpc("get_dashboard_summary");
         if (!summaryError) {
           const row = Array.isArray(summaryData) ? summaryData[0] : summaryData;
           if (row) {
-            setSummaryStats(mapDashboardSummary(row as DashboardSummaryRow));
-            setLoading(false);
-            return;
+            rpcSummary = row as DashboardSummaryRow;
           }
         }
       } catch {
         // Fall back to the existing row-based calculations below.
       }
       
-      // Fetch Projects (latest batch only)
-      const { data: maxProjBatchData } = await supabase
-        .from("projects")
-        .select("batch_number")
-        .order("batch_number", { ascending: false })
-        .limit(1);
-      
-      const maxProjBatch = maxProjBatchData && maxProjBatchData.length > 0 ? maxProjBatchData[0].batch_number : null;
-
-      if (maxProjBatch !== null) {
-        const { data: projData } = await supabase
-          .from("projects")
-          .select("pqi_time, pqi_cost, percentage_progress, schedule_health, financial_health, project_manager, project_category, total_budget, budget_usage")
-          .eq("batch_number", maxProjBatch);
-        if (projData) setProjects(projData as Project[]);
-      }
-
       // Fetch Project Targets (latest batch only)
       const { data: maxBatchData } = await supabase
         .from("project_targets")
@@ -220,15 +231,49 @@ export default function DashboardPage() {
       
       const maxBatch = maxBatchData && maxBatchData.length > 0 ? maxBatchData[0].batch_number : null;
       
+      let latestGrossProfit = 0;
+      let latestAmAchievementData: DashboardAchievementItem[] = [];
+
       if (maxBatch !== null) {
         const { data: targetData } = await supabase
           .from("project_targets")
-          .select("account_manager, gp_acc, invoice_date")
-          .eq("batch_number", maxBatch);
-        if (targetData) setTargets(targetData as ProjectTarget[]);
+          .select("account_manager, gp_acc, invoice_date, batch_number")
+          .eq("batch_number", maxBatch)
+          .or("invoice_date.is.null,invoice_date.lt.2025-01-01,invoice_date.gte.2026-01-01");
+        if (targetData) {
+          const normalizedTargets = targetData as ProjectTarget[];
+          setTargets(normalizedTargets);
+          latestGrossProfit = normalizedTargets.reduce((acc, curr) => acc + (Number(curr.gp_acc) || 0), 0);
+          latestAmAchievementData = buildAmAchievementData(normalizedTargets);
+        }
       }
 
-      setSummaryStats(null);
+      if (rpcSummary) {
+        setSummaryStats({
+          ...mapDashboardSummary(rpcSummary),
+          amAchievementData: latestAmAchievementData,
+          totalGrossProfit: latestGrossProfit,
+        });
+      } else {
+        // Fetch Projects only when RPC is unavailable and we must compute fallback stats.
+        const { data: maxProjBatchData } = await supabase
+          .from("projects")
+          .select("batch_number")
+          .order("batch_number", { ascending: false })
+          .limit(1);
+
+        const maxProjBatch = maxProjBatchData && maxProjBatchData.length > 0 ? maxProjBatchData[0].batch_number : null;
+
+        if (maxProjBatch !== null) {
+          const { data: projData } = await supabase
+            .from("projects")
+            .select("pqi_time, pqi_cost, percentage_progress, schedule_health, financial_health, project_manager, project_category, total_budget, budget_usage")
+            .eq("batch_number", maxProjBatch);
+          if (projData) setProjects(projData as Project[]);
+        }
+
+        setSummaryStats(null);
+      }
 
       setLoading(false);
     };
@@ -277,22 +322,6 @@ export default function DashboardPage() {
       .filter(([,v]) => v > 0)
       .map(([name, value]) => ({ name, value }));
 
-    // Schedule health
-    const schedMap: Record<string, number> = {};
-    projects.forEach(p => {
-      const k = p.schedule_health || "Unknown";
-      schedMap[k] = (schedMap[k] || 0) + 1;
-    });
-    const schedData = Object.entries(schedMap).map(([name, value]) => ({ name, value }));
-
-    // Financial health
-    const finMap: Record<string, number> = {};
-    projects.forEach(p => {
-      const k = p.financial_health || "Unknown";
-      finMap[k] = (finMap[k] || 0) + 1;
-    });
-    const finData = Object.entries(finMap).map(([name, value]) => ({ name, value }));
-
     // Progress buckets
     const progBands = [
       { name: "0–25%",   range: [0, 25] },
@@ -338,42 +367,15 @@ export default function DashboardPage() {
         usage:  Math.round((p.budget_usage  ?? 0) / 1_000_000),
       }));
 
-    // Target Achievement by AM (using GP, excluding 2025 invoices)
-    const amMap: Record<string, { target: number, actual: number }> = {};
-    targets.forEach(t => {
-      // Exclude data with invoice date in 2025
-      if (t.invoice_date && t.invoice_date.startsWith("2025")) return;
+    const amAchievementData = buildAmAchievementData(targets);
 
-      // Normalize AM name for consistent grouping
-      const am = (t.account_manager?.trim() || "Unknown");
-      if (!amMap[am]) amMap[am] = { target: 0, actual: 0 };
-      
-      const val = Number(t.gp_acc) || 0;
-      
-      // RULE: Total achievement is total GP_ACC
-      amMap[am].target += val;
-      
-      // RULE: Invoiced achievement is total GP_ACC where INVOICE_DATE is not empty
-      if (t.invoice_date && t.invoice_date.trim() !== "") {
-        amMap[am].actual += val;
-      }
-    });
-
-    const amAchievementData = Object.entries(amMap)
-      .map(([name, vals]) => ({
-        name,
-        target: Math.round(vals.target / 1_000_000),
-        actual: Math.round(vals.actual / 1_000_000),
-        percent: vals.target > 0 ? Math.round((vals.actual / vals.target) * 100) : 0,
-      }))
-      .filter(item => item.target > 0) // Hide AMs with no goals
-      .sort((a, b) => b.target - a.target);
-
-    const totalGrossProfit = Object.values(amMap).reduce((acc, curr) => acc + curr.target, 0);
+    const totalGrossProfit = targets
+      .filter((target) => !(target.invoice_date && target.invoice_date.startsWith("2025")))
+      .reduce((acc, curr) => acc + (Number(curr.gp_acc) || 0), 0);
 
     return {
       total, avgProgress, avgPqiTime, avgPqiCost,
-      pqiTimeData, pqiCostData, schedData, finData,
+      pqiTimeData, pqiCostData,
       progressData, pmData, catData, budgetData, amAchievementData, totalGrossProfit,
     };
   }, [projects, targets]);
@@ -414,7 +416,7 @@ export default function DashboardPage() {
       {(loading || stats) && (
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <KpiCard label="Total Projects"    value={loading ? "–" : stats!.total}                             icon={FolderKanban} color="bg-indigo-500"   loading={loading} />
-          <KpiCard label="Avg Progress"      value={loading ? "–" : `${stats!.avgProgress.toFixed(1)}%`}      icon={Activity}     color="bg-emerald-500"  loading={loading} sub="across all projects" />
+          <KpiCard label="GP Achievement" value={loading ? "–" : `${((stats!.totalGrossProfit / TARGET_GROSS_PROFIT) * 100).toFixed(1)}%`} icon={Activity} color="bg-emerald-500" loading={loading} sub="total gross profit / target gross profit" />
           <KpiCard label="Avg PQI Time"      value={loading ? "–" : `${stats!.avgPqiTime.toFixed(1)}%`}       icon={Clock}        color="bg-amber-500"    loading={loading} sub="schedule performance" />
           <KpiCard label="Avg PQI Cost"      value={loading ? "–" : `${stats!.avgPqiCost.toFixed(1)}%`}       icon={DollarSign}   color="bg-rose-500"     loading={loading} sub="cost performance" />
         </section>
@@ -570,52 +572,7 @@ export default function DashboardPage() {
         </section>
       )}
 
-      {/* Row 4: Schedule Health + Financial Health */}
-      {(loading || stats) && (
-        <section className="grid gap-4 lg:grid-cols-2">
-          <Card className="border shadow-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2"><AlertTriangle className="h-4 w-4 text-amber-500" /> Schedule Health</CardTitle>
-              <CardDescription>Projects grouped by schedule health status</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {loading ? <Skeleton className="h-48 w-full" /> : (
-                <ResponsiveContainer width="100%" height={200}>
-                  <BarChart data={stats!.schedData} layout="vertical" barSize={18}>
-                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--border)" />
-                    <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
-                    <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={80} />
-                    <Tooltip content={<ChartTooltip />} />
-                    <Bar dataKey="value" name="Projects" fill="#f59e0b" radius={[0, 6, 6, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="border shadow-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-emerald-500" /> Financial Health</CardTitle>
-              <CardDescription>Projects grouped by financial health status</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {loading ? <Skeleton className="h-48 w-full" /> : (
-                <ResponsiveContainer width="100%" height={200}>
-                  <BarChart data={stats!.finData} layout="vertical" barSize={18}>
-                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--border)" />
-                    <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
-                    <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={80} />
-                    <Tooltip content={<ChartTooltip />} />
-                    <Bar dataKey="value" name="Projects" fill="#16a34a" radius={[0, 6, 6, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </CardContent>
-          </Card>
-        </section>
-      )}
-
-      {/* Row 6: Top PMs */}
+      {/* Row 4: Top PMs */}
       {(loading || stats) && (
         <section className="grid gap-4 lg:grid-cols-3">
           <Card className="border shadow-sm lg:col-span-2">

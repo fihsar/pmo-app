@@ -166,7 +166,7 @@ am_achievement_data AS (
         ),
         '[]'::jsonb
     ) AS data,
-    COALESCE(SUM(target), 0) AS total_gross_profit
+    COALESCE((SELECT SUM(COALESCE(gp_acc, 0)) FROM latest_targets), 0) AS total_gross_profit
     FROM am_base
 )
 SELECT

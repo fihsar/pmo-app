@@ -18,8 +18,17 @@ The app is now in a better performance state than the original version.
 - The Projects, Prospects, and Backlog pages were moved away from large client-side scan/filter/sort loops and now use server-side paging, filtering, and counts.
 - The batch mismatch that caused `column prospects.batch_number does not exist` has been fixed by adding the missing schema fields and aligning the upload/query path.
 - The latest production build now passes locally with `frontend npm run build`; the Vercel failure was caused by strict TypeScript checks in the dashboard and prospects pages, not by Vercel config.
+- The dashboard total gross profit now uses the same latest-batch `gp_acc` sum as the backlog subtotal so the two screens stay in sync.
+- The dashboard fallback path now parses `gp_acc` numerically before summing so it does not drift if Supabase returns numeric columns as strings.
+- The dashboard now overrides the RPC gross-profit field with a local sum from the latest `project_targets` batch, so the displayed total always matches the backlog calculation.
+- The dashboard no longer shows Schedule Health or Financial Health panels, and the first KPI is now GP Achievement (%) against a 36,000,000,000 gross-profit target.
+- Dashboard Sales Performance (AM achievement and total gross profit) now uses the same default row logic as Backlog: latest `project_targets` batch, total `gp_acc`, and `invoice_date`-not-empty for invoiced values.
+- Both Dashboard and Backlog now exclude rows where `invoice_date` is in year 2025 from achievement/gross-profit calculations to keep reporting scope consistent.
+- Dashboard now skips the full `projects` fallback query when RPC summary is available, reducing unnecessary load while preserving the fallback path.
 - Login/session handling is now centralized in a shared Supabase auth provider, so the app keeps session state consistent across the login page, dashboard layout, and route redirects.
 - The classification logic for FCC/CSS is centralized and updated with the requested keyword additions.
+- The "VA" (Virtual Account vs. Vulnerability Assessment) ambiguity has been resolved by adding banking-specific keywords to FCC strict overrides.
+- Backlog page now uses the unified classification library and respects existing database categories to ensure consistency between server-side filters and UI display.
 - Workbook files are no longer meant to stay tracked in the repo. A root `.gitignore` now ignores `*.xlsx`, and the stray workbook binaries were removed from the workspace.
 
 ## 3. Main Functional Areas
@@ -28,9 +37,8 @@ The dashboard page now reads aggregated values from `backend/dashboard_summary.s
 
 What it returns:
 - total project count
-- average progress
+- GP Achievement (%) based on total gross profit versus the 36,000,000,000 target
 - average PQI time and PQI cost
-- schedule and financial health distributions
 - progress distribution
 - project manager and category breakdowns
 - budget chart data
@@ -75,14 +83,41 @@ CSS now includes the requested terms:
 - VA Bulk
 - Project Manager BaU
 - Privileged Access Management
+- Data Loss Prevention
+- DLP
+- Forcepoint
+- Fazpass
+- CipherTrust
+- Proxy
+- Third Party Assesment
+- Audit
+
+The Prospects list also recomputes the displayed category from the prospect name so older rows stored as `UNCLASSIFIED` can render as CSS when they match the shared classifier.
+Keywords such as Data Loss Prevention, DLP, Forcepoint, Fazpass, and CipherTrust are now treated as strict CSS overrides so they do not fall back to `UNCLASSIFIED` in split-keyword cases.
+Backlog now also treats project names containing `Microfocus Fortify`, `Microfocus`, or `Fortify` as CSS overrides and reapplies category mapping on loaded rows so stale stored categories do not persist in the UI.
+- The backlog page has been reverted back to server-side filtering for performance reasons. Client-side filtering was causing pagination issues and poor performance with large datasets.
+- Added new database schema requirement: `backend/add_category_columns.sql` adds `category` and `category_note` columns to the `project_targets` table to enable server-side category filtering.
+- Server-side category filtering simplified to only filter by the `category` field. FCC, CSS, and other category filters now strictly match their respective category values (`category.eq.FCC`, `category.eq.CSS`).
+- UNCLASSIFIED filter matches items with `category.eq.UNCLASSIFIED`, `category.is.null`, or empty category values.
+- This approach ensures items are only shown in their assigned category filter, preventing miscategorization issues where CSS items were appearing in FCC results.
+- Pagination is now handled server-side again, ensuring proper performance with hundreds of records and correct total counts.
 
 FCC now includes the requested terms:
 - Gowap
 - IFMX
 - Garuda
+- CIMB Berhad
+- Book of Octo
 
-### Matching caution
-`VA` was treated carefully so it does not match too broadly and create false positives.
+### VA Ambiguity Resolution
+`VA` is treated carefully to avoid false positives:
+- The general `va` keyword remains a CSS indicator (Vulnerability Assessment).
+- Specific FCC overrides were added for banking contexts: `virtual account`, `va bni`, `va bri`, `va mandiri`, and `va bca`.
+- This ensures PID Q2TC240012 and similar banking projects are correctly classified as FCC.
+
+### Unified Classification
+- The Backlog page no longer uses local duplicate logic. It imports from `@/lib/classification`.
+- The classifier now respects existing non-UNCLASSIFIED categories stored in the database, ensuring that if a record was filtered as "FCC" on the server, it remains "FCC" in the UI.
 
 ## 5. Schema And Database Changes
 These database updates were part of the fix and performance work:
@@ -125,4 +160,15 @@ These database updates were part of the fix and performance work:
 - Keep dashboard aggregation in SQL where possible; avoid reintroducing large client-side reductions.
 - Preserve the latest-batch model across list pages and summary logic.
 - When changing FCC/CSS classification, update the shared classification source and verify both Projects and Prospects still agree.
+- Always check for keyword collisions (like `VA`) when adding new classification rules.
 - Prefer narrow, server-side queries for large tables instead of loading full datasets into the client.
+- Ensure any property access on records in `lib/classification.ts` uses bracket notation (`row["key"]`) to maintain TypeScript compliance for `Record<string, unknown>`.
+
+## 10. Performance & Feature Update (April 2026)
+- **Ingestion-Time Classification**: Projects, Prospects, and Backlog now perform classification **once** during Excel upload. Results are stored in the database (`category` and `category_note` columns).
+- **Optimized UI**: Redundant client-side re-classification loops were removed from list pages. The UI now relies on indexed database columns, significantly improving responsiveness for large datasets.
+- **Unified Header Styling**: Projects, Prospects, and Backlog pages now share a consistent header design ("All [Type]" with count subtitles and integrated status messages).
+- **Excel Export**: Added a specialized Excel export to the Backlog page. It allows users to download filtered data with core project details plus the system-calculated `CATEGORY` and `STATUS`.
+- **Status Tracking**: Backlog items now have a functional `status` dropdown (On Track, At Risk, Delayed) backed by database persistence and RLS update policies.
+- **Final UI Polish**: Centered the Category column on all list pages for better visual balance. Renamed "Export Excel" to "Export Data" across the application.
+- **Export Integrity Fix**: Resolved an issue in the Prospects module where the export included records not visible in the web dashboard. The export now correctly applies the Account Manager visibility filter.

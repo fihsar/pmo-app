@@ -5,7 +5,12 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowUpDown, ArrowUp, ArrowDown, Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Upload } from "lucide-react";
+import { 
+  ArrowUpDown, ArrowUp, ArrowDown, Search, ChevronLeft, 
+  ChevronRight, ChevronsLeft, ChevronsRight, Upload, 
+  Download, Inbox, AlertCircle 
+} from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import * as XLSX from "xlsx";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -115,6 +120,14 @@ export default function ProspectsPage() {
     "Pandu R Akbar"
   ];
 
+  const cssNameFallbackPatterns = [
+    "%Data Loss Prevention%",
+    "%DLP%",
+    "%Forcepoint%",
+    "%Fazpass%",
+    "%CipherTrust%",
+  ];
+
   const escapeSearch = (value: string) => value.trim().replace(/,/g, " ");
 
   const getProspectsOrderColumn = (key: keyof Prospect) => {
@@ -171,7 +184,14 @@ export default function ProspectsPage() {
         .in("am_name", allowedAMs);
 
       if (categoryFilter !== "all") {
-        query = query.eq("category", categoryFilter);
+        if (categoryFilter === "CSS") {
+          query = query.or([
+            "category.eq.CSS",
+            ...cssNameFallbackPatterns.map((pattern) => `prospect_name.ilike.${pattern}`),
+          ].join(","));
+        } else {
+          query = query.eq("category", categoryFilter);
+        }
       }
 
       if (startDate) {
@@ -208,7 +228,11 @@ export default function ProspectsPage() {
         setProspects([]);
         setTotalProspectsCount(0);
       } else {
-        setProspects((pageData || []).map((prospect) => ({ ...prospect, amount: parseNumeric(prospect.amount), gp: parseNumeric(prospect.gp) } as Prospect)));
+        setProspects((pageData || []).map((prospect) => ({
+          ...prospect,
+          amount: parseNumeric(prospect.amount),
+          gp: parseNumeric(prospect.gp),
+        } as Prospect)));
         setTotalProspectsCount(count || 0);
       }
     } else {
@@ -313,7 +337,7 @@ export default function ProspectsPage() {
 
       if (!isSupabaseConfigured) {
         setProspects(newProspects);
-        setSuccess("Loaded from Excel (Local State Only - Supabase not connected).");
+        setSuccess(`Loaded from Excel locally using ${file.name} (Supabase not connected).`);
         setLoading(false);
         return;
       }
@@ -348,7 +372,7 @@ export default function ProspectsPage() {
         if (insertError) throw insertError;
       }
 
-      setSuccess(`Successfully uploaded ${newProspects.length} prospects in batch ${nextBatch}!`);
+      setSuccess(`Successfully uploaded ${newProspects.length} prospects in batch ${nextBatch} using ${file.name}!`);
 
       await loadProspects();
     } catch (err: any) {
@@ -357,6 +381,74 @@ export default function ProspectsPage() {
     } finally {
       setLoading(false);
       e.target.value = '';
+    }
+  };
+
+  const handleExport = async () => {
+    if (!isSupabaseConfigured || loading) return;
+    setLoading(true);
+    setError("");
+    setSuccess("");
+    
+    try {
+      const { data: maxBatchData } = await supabase
+        .from("prospects")
+        .select("batch_number")
+        .order("batch_number", { ascending: false })
+        .limit(1);
+        
+      const maxBatch = maxBatchData && maxBatchData.length > 0 ? maxBatchData[0].batch_number : 0;
+      if (maxBatch === 0) {
+        setError("No data found to export.");
+        setLoading(false);
+        return;
+      }
+
+      let query = supabase.from("prospects").select("*").eq("batch_number", maxBatch).in("am_name", allowedAMs);
+
+      if (searchQuery.trim()) {
+        const q = searchQuery.trim().replace(/,/g, " ");
+        query = query.or(`prospect_name.ilike.%${q}%,am_name.ilike.%${q}%,company_name.ilike.%${q}%,id_project.ilike.%${q}%`);
+      }
+
+      if (categoryFilter !== "all") {
+        if (categoryFilter === "UNCLASSIFIED") query = query.or("category.eq.UNCLASSIFIED,category.is.null,category.eq.");
+        else query = query.eq("category", categoryFilter);
+      }
+
+      const { data, error: exportError } = await query.order("prospect_name", { ascending: true });
+      if (exportError) throw exportError;
+
+      if (!data || data.length === 0) {
+        setError("No matching data found to export.");
+        setLoading(false);
+        return;
+      }
+
+      const exportData = data.map(p => ({
+        'PROSPECT_NAME': p.prospect_name,
+        'AM_NAME': p.am_name,
+        'COMPANY_NAME': p.company_name,
+        'ID_PROJECT': p.id_project,
+        'AMOUNT': p.amount,
+        'GP': p.gp,
+        'STATUS': p.status,
+        'CONFIDENCE_LEVEL': p.confidence_level,
+        'EST_PROSPECT_CLOSE_DATE': p.est_prospect_close_date,
+        'TARGET_DATE': p.target_date,
+        'CATEGORY': p.category,
+        'CATEGORY_NOTE': p.category_note
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Prospects");
+      XLSX.writeFile(wb, `Prospects_Export_${new Date().toISOString().split('T')[0]}.xlsx`);
+      setSuccess(`Successfully exported ${data.length} prospects!`);
+    } catch (err: any) {
+      setError(`Export failed: ${err.message}`);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -378,15 +470,20 @@ export default function ProspectsPage() {
     return prospects.reduce((acc, curr) => acc + (curr.gp || 0), 0);
   }, [prospects]);
 
-  const renderSortableHeader = (label: React.ReactNode, key: keyof Prospect, title?: string) => {
+  const renderSortableHeader = (label: React.ReactNode, key: keyof Prospect, title?: string, align: "left" | "center" = "left", className?: string) => {
     const isActive = sortConfig?.key === key;
     return (
       <th 
-        className="py-2 pr-3 font-medium cursor-pointer hover:text-foreground select-none group" 
+        className={cn(
+          "py-2 pr-3 font-medium cursor-pointer hover:text-foreground select-none group",
+          align === "center" && "text-center pr-0",
+          className
+        )}
         onClick={() => handleSort(key)}
         title={title}
       >
-        <div className="flex items-center gap-1">
+        <div className={cn("flex items-center gap-1", align === "center" && "justify-center")}>
+          {align === "center" && <div className="w-3.5" />} {/* Spacer to balance sort icon */}
           {label}
           {isActive ? (
             sortConfig.direction === "asc" ? (
@@ -424,27 +521,26 @@ export default function ProspectsPage() {
               />
             </label>
           </Button>
+          <Button 
+            variant="default" 
+            className="flex items-center gap-2" 
+            onClick={handleExport}
+            disabled={loading || totalProspectsCount === 0}
+          >
+            <Download className="h-4 w-4" />
+            Export Data
+          </Button>
         </div>
       </div>
 
-      {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-600 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-400">
-          {error}
-        </div>
-      )}
-      
-      {success && (
-        <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-600 dark:border-green-900/50 dark:bg-green-900/20 dark:text-green-400">
-          {success}
-        </div>
-      )}
-
       <Card className="border shadow-sm">
-        <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4">
+        <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-2 sm:space-y-0">
           <div>
-            <CardTitle>Prospects Database</CardTitle>
+            <CardTitle>All Prospects</CardTitle>
             <CardDescription>
-              {totalProspectsCount} {totalProspectsCount === 1 ? 'prospect' : 'prospects'} found
+              {error && <span className="text-destructive font-medium block mt-1">{error}</span>}
+              {success && <span className="text-green-600 dark:text-green-400 font-medium block mt-1">{success}</span>}
+              {totalProspectsCount > 0 && <span className="block mt-1">Showing {prospects.length} of {totalProspectsCount} prospects</span>}
             </CardDescription>
           </div>
           <div className="flex flex-col md:flex-row items-center gap-3">
@@ -539,7 +635,7 @@ export default function ProspectsPage() {
                   {renderSortableHeader("Client", "client_name")}
                   {renderSortableHeader("Prospect Name", "prospect_name")}
                   {renderSortableHeader("Account Manager", "am_name")}
-                  {renderSortableHeader("Category", "category")}
+                  {renderSortableHeader("Category", "category", undefined, "center")}
                   {renderSortableHeader("Status", "status")}
                   {renderSortableHeader("Revenue", "amount")}
                   {renderSortableHeader("Gross Profit", "gp")}
@@ -548,20 +644,41 @@ export default function ProspectsPage() {
               </thead>
               <tbody>
                 {loading && prospects.length === 0 ? (
-                  <tr>
-                    <td className="py-6 text-muted-foreground text-center" colSpan={9}>Loading prospects...</td>
-                  </tr>
+                  Array.from({ length: 10 }).map((_, i) => (
+                    <tr key={i} className="border-b last:border-0">
+                      {Array.from({ length: 9 }).map((_, j) => (
+                        <td key={j} className="py-4 pr-3">
+                          <Skeleton className="h-4 w-full" />
+                        </td>
+                      ))}
+                    </tr>
+                  ))
                 ) : prospects.length === 0 ? (
                   <tr>
-                    <td className="py-12 text-center text-muted-foreground" colSpan={9}>
-                      <p>No prospects found.</p>
-                      <p className="text-xs mt-1">Upload a Report_Prospect_CL*.xlsx file to get started.</p>
+                    <td className="py-24 text-center text-muted-foreground" colSpan={9}>
+                      <div className="flex flex-col items-center justify-center gap-3">
+                        <div className="rounded-full bg-muted p-4">
+                          <Inbox className="h-8 w-8 text-muted-foreground/40" />
+                        </div>
+                        <div>
+                          <p className="font-medium text-foreground">No prospects found</p>
+                          <p className="text-xs">Upload a prospect report to get started.</p>
+                        </div>
+                      </div>
                     </td>
                   </tr>
                 ) : totalProspectsCount === 0 ? (
                   <tr>
-                    <td className="py-12 text-center text-muted-foreground" colSpan={9}>
-                      <p>No matching prospects found for &quot;{searchQuery}&quot;.</p>
+                    <td className="py-24 text-center text-muted-foreground" colSpan={9}>
+                      <div className="flex flex-col items-center justify-center gap-3">
+                        <div className="rounded-full bg-muted p-4">
+                          <Search className="h-8 w-8 text-muted-foreground/40" />
+                        </div>
+                        <div>
+                          <p className="font-medium text-foreground">No matches found</p>
+                          <p className="text-xs">Try adjusting your filters or search query.</p>
+                        </div>
+                      </div>
                     </td>
                   </tr>
                 ) : (
@@ -572,17 +689,19 @@ export default function ProspectsPage() {
                         <td className="py-2 pr-3 text-muted-foreground max-w-[150px] truncate" title={p.client_name || ""}>{p.client_name || "-"}</td>
                         <td className="py-2 pr-3 font-medium max-w-[200px] truncate" title={p.prospect_name || ""}>{p.prospect_name || "-"}</td>
                         <td className="py-2 pr-3 text-muted-foreground max-w-[150px] truncate" title={p.am_name || ""}>{p.am_name || "-"}</td>
-                        <td className="py-2 pr-3">
-                          <span className={cn(
-                            "px-2 py-0.5 rounded-full text-[10px] font-medium border whitespace-nowrap",
-                            p.category === "FCC" && "bg-blue-100 text-blue-700 border-blue-200",
-                            p.category === "CSS" && "bg-purple-100 text-purple-700 border-purple-200",
-                            p.category === "UNCLASSIFIED" && "bg-slate-100 text-slate-700 border-slate-200"
-                          )} title={p.category_note || ""}>
-                            {p.category || "-"}
-                          </span>
+                        <td className="py-2 text-center">
+                          <div className="flex justify-center">
+                            <span className={cn(
+                              "px-2 py-0.5 rounded-full text-[10px] font-medium border whitespace-nowrap",
+                              p.category === "FCC" && "bg-blue-100 text-blue-700 border-blue-200",
+                              p.category === "CSS" && "bg-purple-100 text-purple-700 border-purple-200",
+                              p.category === "UNCLASSIFIED" && "bg-slate-100 text-slate-700 border-slate-200"
+                            )} title={p.category_note || ""}>
+                              {p.category || "-"}
+                            </span>
+                          </div>
                         </td>
-                        <td className="py-2 pr-3 text-muted-foreground">
+                        <td className="py-2 pr-3">
                           <span className={cn(
                             "px-2 py-0.5 rounded-full text-[10px] font-medium border",
                             p.status?.toLowerCase().includes("win") ? "bg-green-100 text-green-700 border-green-200" :
