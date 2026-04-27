@@ -12,6 +12,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import * as XLSX from "xlsx";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
+import { formatDate, parseDate, parseNumeric, parseText } from "@/lib/excel-utils";
 import { cn } from "@/lib/utils";
 import { Checkbox } from "@/components/ui/checkbox";
 import { determineCategory } from "@/lib/classification";
@@ -52,61 +53,6 @@ type ProjectTarget = {
   status?: string | null;
   category?: string | null;
   category_note?: string | null;
-};
-
-// Helpers for robust parsing
-const parseDate = (value: unknown): string | null => {
-  if (!value) return null;
-  // Handle Excel serial number (no timezone issues)
-  if (typeof value === "number") {
-    const utcDays = Math.floor(value) - 25569;
-    const ms = utcDays * 86400 * 1000;
-    const d = new Date(ms);
-    const yyyy = d.getUTCFullYear();
-    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
-    const dd = String(d.getUTCDate()).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd}`;
-  }
-  // Handle Date object (fallback)
-  if (value instanceof Date) {
-    const yyyy = value.getUTCFullYear();
-    const mm = String(value.getUTCMonth() + 1).padStart(2, "0");
-    const dd = String(value.getUTCDate()).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd}`;
-  }
-  // Handle string dates
-  if (typeof value === "string" && value.trim()) {
-    return value.trim().split("T")[0];
-  }
-  return null;
-};
-
-const parseNumeric = (value: unknown): number | null => {
-  if (value === undefined || value === null || value === "") return null;
-  const num = Number(value);
-  return isNaN(num) ? null : num;
-};
-
-const parseText = (value: unknown): string | null => {
-  if (value === undefined || value === null) return null;
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    return trimmed ? trimmed : null;
-  }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  return null;
-};
-
-const formatDate = (dateStr: string | null): string => {
-  if (!dateStr) return "-";
-  const parts = dateStr.split("-");
-  if (parts.length === 3) {
-    const [year, month, day] = parts;
-    return `${day}-${month}-${year}`;
-  }
-  return dateStr;
 };
 
 // Classification logic is now imported from @/lib/classification
@@ -713,8 +659,8 @@ export default function ProjectTargetPage() {
               <thead>
                 <tr className="border-b text-left text-muted-foreground whitespace-nowrap">
                   {renderSortableHeader("PID", "project_id")}
-                  {renderSortableHeader("Customer", "customer")}
                   {renderSortableHeader("Project Name", "project_name")}
+                  {renderSortableHeader("Customer", "customer")}
                   {renderSortableHeader("Project Manager", "project_manager")}
                   {renderSortableHeader("Account Manager", "account_manager")}
                   {renderSortableHeader("Term of Payment", "term_of_payment_sales")}
@@ -769,8 +715,8 @@ export default function ProjectTargetPage() {
                     return (
                       <tr key={target.id || idx} className="border-b last:border-0 hover:bg-muted/20 transition-colors whitespace-nowrap">
                         <td className="py-2 pr-3 font-medium">{target.project_id || "-"}</td>
-                        <td className="py-2 pr-3 text-muted-foreground max-w-[150px] truncate" title={target.customer || ""}>{target.customer || "-"}</td>
                         <td className="py-2 pr-3 font-medium max-w-[200px] truncate" title={target.project_name || ""}>{target.project_name || "-"}</td>
+                        <td className="py-2 pr-3 text-muted-foreground max-w-[150px] truncate" title={target.customer || ""}>{target.customer || "-"}</td>
                         <td className="py-2 pr-3 text-muted-foreground">{target.project_manager || "-"}</td>
                         <td className="py-2 pr-3 text-muted-foreground">{target.account_manager || "-"}</td>
                         <td className="py-2 pr-3 text-muted-foreground max-w-[200px] truncate" title={target.term_of_payment_sales || ""}>{target.term_of_payment_sales || "-"}</td>
@@ -843,7 +789,7 @@ export default function ProjectTargetPage() {
           {totalTargetsCount > 0 && (
             <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 border-t pt-4">
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <span>Show</span>
+                <span>Rows per page</span>
                 <Select
                   value={pageSize.toString()}
                   onValueChange={(val) => setPageSize(Number(val))}
@@ -858,7 +804,6 @@ export default function ProjectTargetPage() {
                     <SelectItem value="100">100</SelectItem>
                   </SelectContent>
                 </Select>
-                <span>rows per page</span>
               </div>
 
               <div className="flex flex-col sm:flex-row items-center gap-4">
