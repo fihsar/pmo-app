@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useState, useCallback } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,7 +21,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { isSupabaseConfigured } from "@/lib/supabase";
+import { isSupabaseConfigured, supabase } from "@/lib/supabase";
+import { useAuthSession } from "@/components/auth-session-provider";
+import { ShieldAlert } from "lucide-react";
 
 type ProfileRow = {
   id: string;
@@ -33,12 +35,13 @@ type ProfileRow = {
 };
 
 export default function UserManagementPage() {
+  const { role, loading: authLoading } = useAuthSession();
   const [users, setUsers] = useState<ProfileRow[]>([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState("Member");
+  const [selectedRole, setSelectedRole] = useState("Member");
   const [status, setStatus] = useState("Invited");
   const [editName, setEditName] = useState("");
   const [editEmail, setEditEmail] = useState("");
@@ -51,14 +54,26 @@ export default function UserManagementPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  const loadUsers = async () => {
+  const loadUsers = useCallback(async () => {
     if (!isSupabaseConfigured) {
       setError("Supabase environment is not configured.");
       setLoading(false);
       return;
     }
 
-    const response = await fetch("/api/user-management/users", { method: "GET" });
+    if (role !== "Superadmin") {
+      setError("Unauthorized: Superadmin access required.");
+      setLoading(false);
+      return;
+    }
+
+    const { data: { session } } = await supabase.auth.getSession();
+    const response = await fetch("/api/user-management/users", { 
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${session?.access_token}`
+      }
+    });
     const payload = (await response.json()) as { users?: ProfileRow[]; error?: string };
 
     if (!response.ok) {
@@ -69,12 +84,16 @@ export default function UserManagementPage() {
 
     setUsers(payload.users ?? []);
     setLoading(false);
-  };
+  }, [role]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void loadUsers();
-  }, []);
+    if (!authLoading && role === "Superadmin") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      void loadUsers();
+    } else if (!authLoading && role !== "Superadmin") {
+      setLoading(false);
+    }
+  }, [authLoading, role, loadUsers]);
 
   const handleInvite = async (e: FormEvent) => {
     e.preventDefault();
@@ -95,11 +114,12 @@ export default function UserManagementPage() {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "Authorization": `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
       },
       body: JSON.stringify({
         fullName: name.trim(),
         email: normalizedEmail,
-        role,
+        role: selectedRole,
         status,
       }),
     });
@@ -114,7 +134,7 @@ export default function UserManagementPage() {
     setSuccess(payload.message ?? "User invited successfully.");
     setName("");
     setEmail("");
-    setRole("Member");
+    setSelectedRole("Member");
     setStatus("Invited");
     setShowCreateForm(false);
     await loadUsers();
@@ -146,7 +166,10 @@ export default function UserManagementPage() {
 
     const response = await fetch(`/api/user-management/users/${user.id}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: { 
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
+      },
       body: JSON.stringify({
         fullName: editName.trim(),
         email: editEmail.trim().toLowerCase(),
@@ -178,6 +201,9 @@ export default function UserManagementPage() {
 
     const response = await fetch(`/api/user-management/users/${pendingDeleteUser.id}`, {
       method: "DELETE",
+      headers: {
+        "Authorization": `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
+      }
     });
     const payload = (await response.json()) as { message?: string; error?: string };
     if (!response.ok) {
@@ -191,6 +217,21 @@ export default function UserManagementPage() {
     setPendingDeleteUser(null);
     setDeletingId(null);
   };
+
+  if (!authLoading && role !== "Superadmin") {
+    return (
+      <div className="flex flex-col items-center justify-center py-20">
+        <div className="mb-4 rounded-full bg-destructive/10 p-6">
+          <ShieldAlert className="h-12 w-12 text-destructive" />
+        </div>
+        <h2 className="mb-2 text-2xl font-bold">Access Denied</h2>
+        <p className="max-w-md text-center text-muted-foreground">
+          You do not have the necessary permissions to access this page. 
+          Please contact a Superadmin if you believe this is an error.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -249,7 +290,7 @@ export default function UserManagementPage() {
                 disabled={saving}
                 className="md:col-span-2"
               />
-              <Select value={role} onValueChange={setRole} disabled={saving}>
+              <Select value={selectedRole} onValueChange={setSelectedRole} disabled={saving}>
                 <SelectTrigger>
                   <SelectValue placeholder="Role" />
                 </SelectTrigger>

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -19,20 +18,10 @@ func main() {
 	cwd, _ := os.Getwd()
 	log.Printf("Info: Menjalankan backend dari direktori: %s", cwd)
 
-	// Coba muat file .env
-	err := godotenv.Load()
-	if err != nil {
-		// Jika gagal, coba cari di folder 'backend' (berguna jika dijalankan dari root pmo-app)
-		envPath := filepath.Join(cwd, "backend", ".env")
-		err = godotenv.Load(envPath)
-		if err != nil {
-			log.Println("⚠️ Catatan: File .env tidak ditemukan. Program akan mencoba mengambil dari environment variable sistem.")
-		} else {
-			log.Println("✅ File .env berhasil dimuat dari folder /backend")
-		}
-	} else {
-		log.Println("✅ File .env berhasil dimuat")
-	}
+	// Coba muat file .env dari berbagai lokasi umum
+	_ = godotenv.Load() // Coba folder saat ini
+	_ = godotenv.Load("../../.env") // Coba root backend (jika dijalankan dari cmd/api)
+	_ = godotenv.Load("backend/.env") // Coba folder backend (jika dijalankan dari project root)
 
 	// 2. Ambil dan validasi DATABASE_URL
 	dbURL := os.Getenv("DATABASE_URL")

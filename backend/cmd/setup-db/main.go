@@ -29,8 +29,8 @@ func main() {
 	}
 	defer db.Close()
 
-	// Read SQL file
-	sqlBytes, err := os.ReadFile("projects_schema.sql")
+	// Read SQL file - adjust path since we are in cmd/setup-db/
+	sqlBytes, err := os.ReadFile("../../projects_schema.sql")
 	if err != nil {
 		log.Fatal("ERROR reading projects_schema.sql:", err)
 	}

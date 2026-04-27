@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
+import { verifyAdmin } from "@/lib/supabase-server";
 
 export async function GET() {
+  const auth = await verifyAdmin();
+  if ("error" in auth) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
   if (!isSupabaseAdminConfigured) {
     return NextResponse.json(
       { error: "Server is missing SUPABASE_SERVICE_ROLE_KEY configuration." },
@@ -22,6 +28,11 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const auth = await verifyAdmin();
+  if ("error" in auth) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
   if (!isSupabaseAdminConfigured) {
     return NextResponse.json(
       { error: "Server is missing SUPABASE_SERVICE_ROLE_KEY configuration." },

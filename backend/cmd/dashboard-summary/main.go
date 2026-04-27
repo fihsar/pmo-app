@@ -29,8 +29,8 @@ func main() {
 	}
 	defer db.Close()
 
-	// Read SQL file
-	sqlBytes, err := os.ReadFile("dashboard_summary.sql")
+	// Read SQL file - adjust path since we are in cmd/dashboard-summary/
+	sqlBytes, err := os.ReadFile("../../dashboard_summary.sql")
 	if err != nil {
 		log.Fatal("ERROR reading dashboard_summary.sql:", err)
 	}

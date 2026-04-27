@@ -276,7 +276,7 @@ export function determineCategory(row: Record<string, unknown>): CategoryResult 
   if (existingCategory === "FCC" || existingCategory === "CSS") {
     return { 
       category: existingCategory as Category, 
-      category_note: (row["category_note"] as any) || "col-based" 
+      category_note: (row["category_note"] as string | null) || "col-based" 
     };
   }
 

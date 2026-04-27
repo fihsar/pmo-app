@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { 
   ArrowUpDown, ArrowUp, ArrowDown, Search, ChevronLeft, 
   ChevronRight, ChevronsLeft, ChevronsRight, Upload, 
-  Download, Inbox, AlertCircle 
+  Download, Inbox 
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import * as XLSX from "xlsx";
@@ -45,7 +45,7 @@ type Prospect = {
 };
 
 // Helpers for robust parsing
-const parseDate = (value: any): string | null => {
+const parseDate = (value: unknown): string | null => {
   if (!value) return null;
   // Handle Excel serial number (no timezone issues)
   if (typeof value === "number") {
@@ -71,7 +71,7 @@ const parseDate = (value: any): string | null => {
   return null;
 };
 
-const parseNumeric = (value: any): number | null => {
+const parseNumeric = (value: unknown): number | null => {
   if (value === undefined || value === null || value === "") return null;
   const num = Number(value);
   return isNaN(num) ? null : num;
@@ -87,10 +87,28 @@ const formatDate = (dateStr: string | null): string => {
   return dateStr;
 };
 
-const isMissingBatchColumnError = (error: any): boolean => {
+const isMissingBatchColumnError = (error: unknown): boolean => {
   const msg = String(error?.message || "").toLowerCase();
   return msg.includes("batch_number") && msg.includes("does not exist");
 };
+
+const allowedAMs = [
+  "Andrew Daniel Gunalan",
+  "Elsa Yolanda Simanjuntak",
+  "Graeta Venato",
+  "Lizty Latifah",
+  "M. Satria Manggala Yudha",
+  "Merlin",
+  "Pandu R Akbar"
+];
+
+const cssNameFallbackPatterns = [
+  "%Managed Service%",
+  "%Internet Service%",
+  "%Bandwidth%",
+  "%Lastmile%",
+  "%Leased Line%"
+];
 
 export default function ProspectsPage() {
   const [prospects, setProspects] = useState<Prospect[]>([]);
@@ -98,8 +116,11 @@ export default function ProspectsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [totalAmount, setTotalAmount] = useState(0);
+  const [totalGP, setTotalGP] = useState(0);
 
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -110,23 +131,13 @@ export default function ProspectsPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  const allowedAMs = [
-    "Andrew Daniel Gunalan",
-    "Elsa Yolanda Simanjuntak",
-    "Graeta Venato",
-    "Lizty Latifah",
-    "M. Satria Manggala Yudha",
-    "Merlin",
-    "Pandu R Akbar"
-  ];
-
-  const cssNameFallbackPatterns = [
-    "%Data Loss Prevention%",
-    "%DLP%",
-    "%Forcepoint%",
-    "%Fazpass%",
-    "%CipherTrust%",
-  ];
+  // Debounce search query
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
 
   const escapeSearch = (value: string) => value.trim().replace(/,/g, " ");
 
@@ -147,29 +158,20 @@ export default function ProspectsPage() {
     }
   };
 
-  const loadProspects = async () => {
+  const loadProspects = useCallback(async () => {
     if (!isSupabaseConfigured) return;
+    const startTime = performance.now();
     setLoading(true);
 
-    const { data: maxBatchData, error: maxBatchError } = await supabase
-      .from("prospects")
-      .select("batch_number")
-      .order("batch_number", { ascending: false })
-      .limit(1);
-
+    const { data: maxBatch, error: maxBatchError } = await supabase.rpc("get_latest_batch", { p_table_id: "prospects" });
+      
     if (maxBatchError) {
-      if (isMissingBatchColumnError(maxBatchError)) {
-        setError("Prospects table is missing batch_number. Run backend/add_batch_columns.sql to enable safe batch mode.");
-      } else {
-        console.error("Failed to fetch max batch_number:", maxBatchError.message);
-        setError(`Failed to load prospects: ${maxBatchError.message}`);
-      }
+      console.error("Failed to fetch latest batch:", maxBatchError.message);
+      setError(`Failed to load prospects: ${maxBatchError.message}`);
       setProspects([]);
       setLoading(false);
       return;
     }
-
-    const maxBatch = maxBatchData && maxBatchData.length > 0 ? maxBatchData[0].batch_number : 0;
 
     if (maxBatch > 0) {
       const start = (currentPage - 1) * pageSize;
@@ -202,8 +204,8 @@ export default function ProspectsPage() {
         query = query.lte("target_date", endDate);
       }
 
-      if (searchQuery.trim()) {
-        const q = escapeSearch(searchQuery);
+      if (debouncedSearchQuery.trim()) {
+        const q = escapeSearch(debouncedSearchQuery);
         query = query.or(
           [
             `id_project.ilike.%${q}%`,
@@ -235,17 +237,42 @@ export default function ProspectsPage() {
         } as Prospect)));
         setTotalProspectsCount(count || 0);
       }
+
+      // Fetch subtotals using RPC
+      const { data: aggregateData, error: aggregateError } = await supabase.rpc("get_prospects_subtotals", {
+        p_batch_number: maxBatch,
+        p_allowed_ams: allowedAMs,
+        p_search_query: debouncedSearchQuery.trim() ? escapeSearch(debouncedSearchQuery) : "",
+        p_start_date: startDate || null,
+        p_end_date: endDate || null,
+        p_category_filter: categoryFilter
+      });
+
+      if (aggregateError) {
+        console.error("Failed to load prospects aggregates:", aggregateError.message);
+        setTotalAmount(0);
+        setTotalGP(0);
+      } else {
+        const stats = (Array.isArray(aggregateData) ? aggregateData[0] : aggregateData) as { sum_amount: number; sum_gp: number } | null;
+        setTotalAmount(stats?.sum_amount ?? 0);
+        setTotalGP(stats?.sum_gp ?? 0);
+      }
     } else {
       setProspects([]);
       setTotalProspectsCount(0);
+      setTotalAmount(0);
+      setTotalGP(0);
     }
     
     setLoading(false);
-  };
+    const endTime = performance.now();
+    console.log(`[Prospects] Query latency: ${(endTime - startTime).toFixed(2)}ms`);
+  }, [debouncedSearchQuery, startDate, endDate, categoryFilter, sortConfig, currentPage, pageSize]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadProspects();
-  }, [searchQuery, startDate, endDate, categoryFilter, sortConfig, currentPage, pageSize]);
+  }, [loadProspects]);
 
   const handlePresetRangeSelect = (preset: string) => {
     if (preset === "custom") return;
@@ -288,6 +315,7 @@ export default function ProspectsPage() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCurrentPage(1);
   }, [searchQuery, startDate, endDate, sortConfig, pageSize, categoryFilter]);
 
@@ -305,10 +333,10 @@ export default function ProspectsPage() {
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
       
-      const json = XLSX.utils.sheet_to_json(worksheet, { defval: null }) as any[];
+      const json = XLSX.utils.sheet_to_json(worksheet, { defval: null }) as Record<string, unknown>[];
       
       const newProspects: Prospect[] = json.map((row) => {
-        const categoryResult = determineCategory(row as Record<string, unknown>);
+        const categoryResult = determineCategory(row);
         return {
         id_top_sales: parseNumeric(row["ID_TOP_SALES"]),
         am_name: row["AM_NAME"] || null,
@@ -375,9 +403,9 @@ export default function ProspectsPage() {
       setSuccess(`Successfully uploaded ${newProspects.length} prospects in batch ${nextBatch} using ${file.name}!`);
 
       await loadProspects();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      setError(`Failed to save to database. If needed, run backend/add_batch_columns.sql to add missing fields. Details: ${err.message}`);
+      setError(`Failed to save to database. If needed, run backend/add_batch_columns.sql to add missing fields. Details: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setLoading(false);
       e.target.value = '';
@@ -391,33 +419,56 @@ export default function ProspectsPage() {
     setSuccess("");
     
     try {
-      const { data: maxBatchData } = await supabase
-        .from("prospects")
-        .select("batch_number")
-        .order("batch_number", { ascending: false })
-        .limit(1);
-        
-      const maxBatch = maxBatchData && maxBatchData.length > 0 ? maxBatchData[0].batch_number : 0;
-      if (maxBatch === 0) {
+      const { data: maxBatch, error: maxBatchError } = await supabase.rpc("get_latest_batch", { p_table_id: "prospects" });
+      if (maxBatchError || !maxBatch) {
         setError("No data found to export.");
         setLoading(false);
         return;
       }
 
-      let query = supabase.from("prospects").select("*").eq("batch_number", maxBatch).in("am_name", allowedAMs);
+      let query = supabase
+        .from("prospects")
+        .select("prospect_name, am_name, company_name, id_project, amount, gp, status, confidence_level, est_prospect_close_date, target_date, category, category_note")
+        .eq("batch_number", maxBatch)
+        .in("am_name", allowedAMs);
 
-      if (searchQuery.trim()) {
-        const q = searchQuery.trim().replace(/,/g, " ");
-        query = query.or(`prospect_name.ilike.%${q}%,am_name.ilike.%${q}%,company_name.ilike.%${q}%,id_project.ilike.%${q}%`);
+      if (debouncedSearchQuery.trim()) {
+        const q = escapeSearch(debouncedSearchQuery);
+        query = query.or(
+          [
+            `id_project.ilike.%${q}%`,
+            `client_name.ilike.%${q}%`,
+            `prospect_name.ilike.%${q}%`,
+            `am_name.ilike.%${q}%`,
+            `company_name.ilike.%${q}%`,
+            `category.ilike.%${q}%`,
+            `status.ilike.%${q}%`,
+          ].join(",")
+        );
       }
 
       if (categoryFilter !== "all") {
-        if (categoryFilter === "UNCLASSIFIED") query = query.or("category.eq.UNCLASSIFIED,category.is.null,category.eq.");
-        else query = query.eq("category", categoryFilter);
+        if (categoryFilter === "CSS") {
+          query = query.or([
+            "category.eq.CSS",
+            ...cssNameFallbackPatterns.map((pattern) => `prospect_name.ilike.${pattern}`),
+          ].join(","));
+        } else if (categoryFilter === "UNCLASSIFIED") {
+          query = query.or("category.eq.UNCLASSIFIED,category.is.null,category.eq.");
+        } else {
+          query = query.eq("category", categoryFilter);
+        }
       }
 
+      if (startDate) query = query.gte("target_date", startDate);
+      if (endDate) query = query.lte("target_date", endDate);
+
+      console.log("[Prospects] Starting export query...");
       const { data, error: exportError } = await query.order("prospect_name", { ascending: true });
-      if (exportError) throw exportError;
+      if (exportError) {
+        console.error("[Prospects] Export query failed:", exportError);
+        throw exportError;
+      }
 
       if (!data || data.length === 0) {
         setError("No matching data found to export.");
@@ -445,8 +496,8 @@ export default function ProspectsPage() {
       XLSX.utils.book_append_sheet(wb, ws, "Prospects");
       XLSX.writeFile(wb, `Prospects_Export_${new Date().toISOString().split('T')[0]}.xlsx`);
       setSuccess(`Successfully exported ${data.length} prospects!`);
-    } catch (err: any) {
-      setError(`Export failed: ${err.message}`);
+    } catch (err: unknown) {
+      setError(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setLoading(false);
     }
@@ -462,13 +513,6 @@ export default function ProspectsPage() {
 
   const totalPages = Math.ceil(totalProspectsCount / pageSize);
 
-  const subtotalAmount = useMemo(() => {
-    return prospects.reduce((acc, curr) => acc + (curr.amount || 0), 0);
-  }, [prospects]);
-
-  const subtotalGP = useMemo(() => {
-    return prospects.reduce((acc, curr) => acc + (curr.gp || 0), 0);
-  }, [prospects]);
 
   const renderSortableHeader = (label: React.ReactNode, key: keyof Prospect, title?: string, align: "left" | "center" = "left", className?: string) => {
     const isActive = sortConfig?.key === key;
@@ -523,7 +567,7 @@ export default function ProspectsPage() {
           </Button>
           <Button 
             variant="default" 
-            className="flex items-center gap-2" 
+            className="flex items-center gap-2 cursor-pointer" 
             onClick={handleExport}
             disabled={loading || totalProspectsCount === 0}
           >
@@ -728,10 +772,10 @@ export default function ProspectsPage() {
                   <tr className="border-t-2 border-muted-foreground/20 text-foreground font-semibold whitespace-nowrap bg-muted/10">
                     <td colSpan={6} className="py-3 pr-3 text-right">SUBTOTAL</td>
                     <td className="py-3 pr-3">
-                      Rp {subtotalAmount.toLocaleString('id-ID', { maximumFractionDigits: 0 })}
+                      Rp {totalAmount.toLocaleString('id-ID', { maximumFractionDigits: 0 })}
                     </td>
                     <td className="py-3 pr-3">
-                      Rp {subtotalGP.toLocaleString('id-ID', { maximumFractionDigits: 0 })}
+                      Rp {totalGP.toLocaleString('id-ID', { maximumFractionDigits: 0 })}
                     </td>
                     <td className="py-3 pr-3"></td>
                   </tr>

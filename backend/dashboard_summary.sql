@@ -1,5 +1,7 @@
 -- Dashboard summary RPC for scalable client rendering.
 -- Returns aggregated metrics for the latest project and project_targets batches.
+-- Optimized to handle AM achievement and total Gross Profit on the server side,
+-- eliminating the need for the frontend to fetch thousands of project_targets rows.
 
 CREATE OR REPLACE FUNCTION public.get_dashboard_summary()
 RETURNS TABLE (
@@ -20,11 +22,12 @@ RETURNS TABLE (
 )
 LANGUAGE sql
 STABLE
+SECURITY DEFINER
 AS $$
 WITH latest_projects AS (
     SELECT *
     FROM public.projects
-    WHERE batch_number = (SELECT max(batch_number) FROM public.projects)
+    WHERE batch_number = get_latest_batch('projects')
 ),
 kpi_projects AS (
     SELECT *
@@ -40,12 +43,13 @@ kpi_projects AS (
 latest_targets AS (
     SELECT *
     FROM public.project_targets
-    WHERE batch_number = (SELECT max(batch_number) FROM public.project_targets)
+    WHERE batch_number = get_latest_batch('targets')
 ),
 targets_for_achievement AS (
+    -- Exclude 2025 achievement rows from both target and invoiced values.
     SELECT *
     FROM latest_targets
-    WHERE invoice_date IS NULL OR to_char(invoice_date, 'YYYY') <> '2025'
+    WHERE invoice_date IS NULL OR (to_char(invoice_date, 'YYYY') <> '2025')
 ),
 am_base AS (
     SELECT
@@ -165,8 +169,7 @@ am_achievement_data AS (
             ORDER BY target DESC, name
         ),
         '[]'::jsonb
-    ) AS data,
-    COALESCE((SELECT SUM(COALESCE(gp_acc, 0)) FROM latest_targets), 0) AS total_gross_profit
+    ) AS data
     FROM am_base
 )
 SELECT
@@ -183,5 +186,5 @@ SELECT
     COALESCE((SELECT data FROM cat_data), '[]'::jsonb) AS cat_data,
     COALESCE((SELECT data FROM budget_data), '[]'::jsonb) AS budget_data,
     COALESCE((SELECT data FROM am_achievement_data), '[]'::jsonb) AS am_achievement_data,
-    COALESCE((SELECT total_gross_profit FROM am_achievement_data), 0) AS total_gross_profit;
+    COALESCE((SELECT SUM(COALESCE(gp_acc, 0)) FROM targets_for_achievement), 0) AS total_gross_profit;
 $$;

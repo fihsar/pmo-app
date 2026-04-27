@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -55,7 +55,7 @@ type ProjectTarget = {
 };
 
 // Helpers for robust parsing
-const parseDate = (value: any): string | null => {
+const parseDate = (value: unknown): string | null => {
   if (!value) return null;
   // Handle Excel serial number (no timezone issues)
   if (typeof value === "number") {
@@ -81,7 +81,7 @@ const parseDate = (value: any): string | null => {
   return null;
 };
 
-const parseNumeric = (value: any): number | null => {
+const parseNumeric = (value: unknown): number | null => {
   if (value === undefined || value === null || value === "") return null;
   const num = Number(value);
   return isNaN(num) ? null : num;
@@ -109,6 +109,7 @@ export default function ProjectTargetPage() {
   const [success, setSuccess] = useState("");
 
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [presetRange, setPresetRange] = useState("custom");
@@ -119,6 +120,14 @@ export default function ProjectTargetPage() {
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+
+  // Debounce search query
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
 
   const escapeSearch = (value: string) => value.trim().replace(/,/g, " ");
 
@@ -142,23 +151,18 @@ export default function ProjectTargetPage() {
     }
   };
 
-  const loadTargets = async () => {
+  const loadTargets = useCallback(async () => {
     if (!isSupabaseConfigured) return;
+    const startTime = performance.now();
     setLoading(true);
     
-    const { data: maxBatchData, error: maxBatchError } = await supabase
-      .from("project_targets")
-      .select("batch_number")
-      .order("batch_number", { ascending: false })
-      .limit(1);
+    const { data: maxBatch, error: maxBatchError } = await supabase.rpc("get_latest_batch", { p_table_id: "targets" });
       
     if (maxBatchError) {
-      console.error("Failed to fetch max batch_number:", maxBatchError.message);
+      console.error("Failed to fetch latest batch:", maxBatchError.message);
       setLoading(false);
       return;
     }
-    
-    const maxBatch = maxBatchData && maxBatchData.length > 0 ? maxBatchData[0].batch_number : 0;
     
     if (maxBatch > 0) {
       const start = (currentPage - 1) * pageSize;
@@ -172,8 +176,8 @@ export default function ProjectTargetPage() {
         .eq("batch_number", maxBatch)
         .or("invoice_date.is.null,invoice_date.lt.2025-01-01,invoice_date.gte.2026-01-01");
 
-      if (searchQuery.trim()) {
-        const q = escapeSearch(searchQuery);
+      if (debouncedSearchQuery.trim()) {
+        const q = escapeSearch(debouncedSearchQuery);
         query = query.or(
           [
             `project_id.ilike.%${q}%`,
@@ -217,53 +221,15 @@ export default function ProjectTargetPage() {
         .order("created_at", { ascending: false })
         .range(start, end);
 
-      let aggregateQuery = supabase
-        .from("project_targets")
-        .select("total, gp_acc")
-        .eq("batch_number", maxBatch)
-        .or("invoice_date.is.null,invoice_date.lt.2025-01-01,invoice_date.gte.2026-01-01");
-
-      if (searchQuery.trim()) {
-        const q = escapeSearch(searchQuery);
-        aggregateQuery = aggregateQuery.or(
-          [
-            `project_id.ilike.%${q}%`,
-            `customer.ilike.%${q}%`,
-            `project_name.ilike.%${q}%`,
-            `project_manager.ilike.%${q}%`,
-            `account_manager.ilike.%${q}%`,
-            `term_of_payment_sales.ilike.%${q}%`,
-            `category.ilike.%${q}%`,
-            `status.ilike.%${q}%`,
-          ].join(",")
-        );
-      }
-
-      if (startDate) {
-        aggregateQuery = aggregateQuery.gte("target_date", startDate);
-      }
-
-      if (endDate) {
-        aggregateQuery = aggregateQuery.lte("target_date", endDate);
-      }
-
-      if (invoiceDateEmpty) {
-        aggregateQuery = aggregateQuery.is("invoice_date", null);
-      }
-
-      if (categoryFilter !== "all") {
-        if (categoryFilter === "CSS") {
-          aggregateQuery = aggregateQuery.eq("category", "CSS");
-        } else if (categoryFilter === "FCC") {
-          aggregateQuery = aggregateQuery.eq("category", "FCC");
-        } else if (categoryFilter === "UNCLASSIFIED") {
-          aggregateQuery = aggregateQuery.or("category.eq.UNCLASSIFIED,category.is.null,category.eq.");
-        } else {
-          aggregateQuery = aggregateQuery.eq("category", categoryFilter);
-        }
-      }
-
-      const { data: aggregateData, error: aggregateError } = await aggregateQuery;
+      // Fetch subtotals using RPC instead of manual reduction of all rows
+      const { data: aggregateData, error: aggregateError } = await supabase.rpc("get_backlog_subtotals", {
+        p_batch_number: maxBatch,
+        p_search_query: debouncedSearchQuery.trim() ? escapeSearch(debouncedSearchQuery) : "",
+        p_start_date: startDate || null,
+        p_end_date: endDate || null,
+        p_invoice_date_empty: invoiceDateEmpty,
+        p_category_filter: categoryFilter
+      });
         
       if (error) {
         console.error("Failed to load project targets:", error.message);
@@ -288,8 +254,9 @@ export default function ProjectTargetPage() {
           gp_acc: parseNumeric(target.gp_acc),
         })));
         setTotalTargetsCount(count || 0);
-        setSubtotalTotal((aggregateData || []).reduce((acc, curr) => acc + (parseNumeric(curr.total) || 0), 0));
-        setSubtotalGrossProfit((aggregateData || []).reduce((acc, curr) => acc + (parseNumeric(curr.gp_acc) || 0), 0));
+        const stats = (Array.isArray(aggregateData) ? aggregateData[0] : aggregateData) as { sum_total: number; sum_gp_acc: number } | null;
+        setSubtotalTotal(stats?.sum_total ?? 0);
+        setSubtotalGrossProfit(stats?.sum_gp_acc ?? 0);
       }
     } else {
       setTargets([]);
@@ -299,11 +266,14 @@ export default function ProjectTargetPage() {
     }
     
     setLoading(false);
-  };
+    const endTime = performance.now();
+    console.log(`[Backlog] Query latency: ${(endTime - startTime).toFixed(2)}ms`);
+  }, [debouncedSearchQuery, startDate, endDate, invoiceDateEmpty, sortConfig, pageSize, currentPage, categoryFilter]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadTargets();
-  }, [searchQuery, startDate, endDate, invoiceDateEmpty, sortConfig, pageSize, categoryFilter, currentPage]);
+  }, [loadTargets]);
 
   const handlePresetRangeSelect = (preset: string) => {
     if (preset === "custom") return;
@@ -347,6 +317,7 @@ export default function ProjectTargetPage() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCurrentPage(1);
   }, [searchQuery, startDate, endDate, invoiceDateEmpty, sortConfig, pageSize, categoryFilter]);
 
@@ -364,7 +335,7 @@ export default function ProjectTargetPage() {
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
       
-      const json = XLSX.utils.sheet_to_json(worksheet, { defval: null }) as any[];
+      const json = XLSX.utils.sheet_to_json(worksheet, { defval: null }) as Record<string, unknown>[];
       
       const newTargets: ProjectTarget[] = json.map((row) => ({
         target_id: parseNumeric(row["ID"]),
@@ -431,9 +402,9 @@ export default function ProjectTargetPage() {
 
       setSuccess(`Successfully uploaded ${newTargets.length} project targets using ${file.name}!`);
       await loadTargets();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      setError(`Failed to save to database. Note: You need to run the updated SQL script to create the 'project_targets' table first! Details: ${err.message}`);
+      setError(`Failed to save to database. Note: You need to run the updated SQL script to create the 'project_targets' table first! Details: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setLoading(false);
       // Reset input
@@ -471,8 +442,8 @@ export default function ProjectTargetPage() {
         .or("invoice_date.is.null,invoice_date.lt.2025-01-01,invoice_date.gte.2026-01-01");
 
       // Apply search/filters
-      if (searchQuery.trim()) {
-        const q = escapeSearch(searchQuery);
+      if (debouncedSearchQuery.trim()) {
+        const q = escapeSearch(debouncedSearchQuery);
         query = query.or(
           [
             `project_id.ilike.%${q}%`,
@@ -534,9 +505,8 @@ export default function ProjectTargetPage() {
       XLSX.writeFile(wb, `Backlog_Export_${new Date().toISOString().split('T')[0]}.xlsx`);
       
       setSuccess(`Successfully exported ${data.length} records to Excel!`);
-    } catch (err: any) {
-      console.error(err);
-      setError(`Export failed: ${err.message}`);
+    } catch (err: unknown) {
+      setError(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setLoading(false);
     }
@@ -611,7 +581,7 @@ export default function ProjectTargetPage() {
           </Button>
           <Button 
             variant="default" 
-            className="flex items-center gap-2" 
+            className="flex items-center gap-2 cursor-pointer" 
             onClick={handleExport}
             disabled={loading || totalTargetsCount === 0}
           >

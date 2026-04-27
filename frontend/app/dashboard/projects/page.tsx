@@ -1,14 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { 
   ArrowUpDown, ArrowUp, ArrowDown, Search, ChevronLeft, 
-  ChevronRight, ChevronsLeft, ChevronsRight, Clock, Upload,
-  Download, AlertCircle, Inbox, FolderKanban
+  ChevronRight, ChevronsLeft, ChevronsRight, Upload, Download, Inbox 
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import * as XLSX from "xlsx";
@@ -80,7 +79,7 @@ type Project = {
 };
 
 // Helpers for robust parsing
-const parseDate = (value: any): string | null => {
+const parseDate = (value: unknown): string | null => {
   if (!value) return null;
   // Handle Excel serial number (no timezone issues)
   if (typeof value === "number") {
@@ -106,7 +105,7 @@ const parseDate = (value: any): string | null => {
   return null;
 };
 
-const parseNumeric = (value: any): number | null => {
+const parseNumeric = (value: unknown): number | null => {
   if (value === undefined || value === null || value === "") return null;
   if (typeof value === "string") {
     const trimmed = value.trim();
@@ -126,7 +125,7 @@ const parseNumeric = (value: any): number | null => {
   return isNaN(num) ? null : num;
 };
 
-const pickNumeric = (obj: any, keys: string[]): number | null => {
+const pickNumeric = (obj: Record<string, unknown>, keys: string[]): number | null => {
   for (const key of keys) {
     if (obj && Object.prototype.hasOwnProperty.call(obj, key)) {
       const parsed = parseNumeric(obj[key]);
@@ -136,7 +135,7 @@ const pickNumeric = (obj: any, keys: string[]): number | null => {
   return null;
 };
 
-const normalizeProject = (project: any): Project => ({
+const normalizeProject = (project: Record<string, unknown>): Project => ({
   ...project,
   percentage_progress: pickNumeric(project, [
     "percentage_progress",
@@ -155,7 +154,7 @@ const normalizeProject = (project: any): Project => ({
   ]),
 });
 
-const isMissingBatchColumnError = (error: any): boolean => {
+const isMissingBatchColumnError = (error: unknown): boolean => {
   const msg = String(error?.message || "").toLowerCase();
   return msg.includes("batch_number") && msg.includes("does not exist");
 };
@@ -176,12 +175,21 @@ export default function ProjectsPage() {
   const [success, setSuccess] = useState("");
 
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [sortConfig, setSortConfig] = useState<{ key: keyof Project; direction: "asc" | "desc" } | null>(null);
   
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+
+  // Debounce search query
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
 
   const escapeSearch = (value: string) => value.trim().replace(/,/g, " ");
 
@@ -204,29 +212,20 @@ export default function ProjectsPage() {
     }
   };
 
-  const loadProjects = async () => {
+  const loadProjects = useCallback(async () => {
     if (!isSupabaseConfigured) return;
+    const startTime = performance.now();
     setLoading(true);
     
-    const { data: maxBatchData, error: maxBatchError } = await supabase
-      .from("projects")
-      .select("batch_number")
-      .order("batch_number", { ascending: false })
-      .limit(1);
+    const { data: maxBatch, error: maxBatchError } = await supabase.rpc("get_latest_batch", { p_table_id: "projects" });
       
     if (maxBatchError) {
-      if (isMissingBatchColumnError(maxBatchError)) {
-        setError("Projects table is missing batch_number. Run backend/add_batch_columns.sql to enable safe batch mode.");
-      } else {
-        console.error("Failed to fetch max batch_number:", maxBatchError.message);
-        setError(`Failed to load projects: ${maxBatchError.message}`);
-      }
+      console.error("Failed to fetch latest batch:", maxBatchError.message);
+      setError(`Failed to load projects: ${maxBatchError.message}`);
       setProjects([]);
       setLoading(false);
       return;
     }
-    
-    const maxBatch = maxBatchData && maxBatchData.length > 0 ? maxBatchData[0].batch_number : 0;
 
     if (maxBatch > 0) {
       const start = (currentPage - 1) * pageSize;
@@ -243,8 +242,8 @@ export default function ProjectsPage() {
         query = query.eq("category", categoryFilter);
       }
 
-      if (searchQuery.trim()) {
-        const q = escapeSearch(searchQuery);
+      if (debouncedSearchQuery.trim()) {
+        const q = escapeSearch(debouncedSearchQuery);
         query = query.or(
           [
             `project_id.ilike.%${q}%`,
@@ -276,14 +275,18 @@ export default function ProjectsPage() {
     }
     
     setLoading(false);
-  };
+    const endTime = performance.now();
+    console.log(`[Projects] Query latency: ${(endTime - startTime).toFixed(2)}ms`);
+  }, [debouncedSearchQuery, sortConfig, currentPage, pageSize, categoryFilter]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadProjects();
-  }, [searchQuery, categoryFilter, sortConfig, currentPage, pageSize]);
+  }, [loadProjects]);
 
   // Reset pagination if search or sort changes
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCurrentPage(1);
   }, [searchQuery, sortConfig, pageSize, categoryFilter]);
 
@@ -302,7 +305,7 @@ export default function ProjectsPage() {
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
 
-      const json = XLSX.utils.sheet_to_json(worksheet, { defval: null }) as any[];
+      const json = XLSX.utils.sheet_to_json(worksheet, { defval: null }) as Record<string, unknown>[];
 
       if (json.length > 0) {
         const headers = Object.keys(json[0]);
@@ -432,8 +435,8 @@ export default function ProjectsPage() {
         setProjects((prev) => [...newProjects, ...prev]);
         setSuccess(`Loaded ${newProjects.length} projects locally from ${file.name}.`);
       }
-    } catch (err: any) {
-      setError(err.message || "Failed to parse Excel file.");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to parse Excel file.");
     } finally {
       setLoading(false);
       e.target.value = ""; // Reset input
@@ -503,8 +506,8 @@ export default function ProjectsPage() {
       XLSX.utils.book_append_sheet(wb, ws, "Projects");
       XLSX.writeFile(wb, `Projects_Export_${new Date().toISOString().split('T')[0]}.xlsx`);
       setSuccess(`Successfully exported ${data.length} projects!`);
-    } catch (err: any) {
-      setError(`Export failed: ${err.message}`);
+    } catch (err: unknown) {
+      setError(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setLoading(false);
     }
@@ -573,7 +576,7 @@ export default function ProjectsPage() {
           </Button>
           <Button 
             variant="default" 
-            className="flex items-center gap-2" 
+            className="flex items-center gap-2 cursor-pointer" 
             onClick={handleExport}
             disabled={loading || totalProjectsCount === 0}
           >

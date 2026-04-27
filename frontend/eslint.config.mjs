@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "read_excel.js",
+    "check_build.js",
+    "check_pid.js",
+    "scratch/**",
   ]),
 ]);
 

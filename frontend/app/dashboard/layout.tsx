@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { isSupabaseConfigured } from "@/lib/supabase";
@@ -35,7 +35,8 @@ type MenuItem = {
   label: string;
   icon: LucideIcon;
   href?: string;
-  subItems?: { href: string; label: string }[];
+  subItems?: { href: string; label: string; allowedRoles?: string[] }[];
+  allowedRoles?: string[];
 };
 
 const menuItems: MenuItem[] = [
@@ -43,23 +44,24 @@ const menuItems: MenuItem[] = [
     label: "Dashboard",
     icon: LayoutDashboard,
     subItems: [
-      { href: "/dashboard", label: "Project Dashboard" },
-      { href: "/dashboard/prospects", label: "List of Prospects" },
-      { href: "/dashboard/projects", label: "List of Projects" },
-      { href: "/dashboard/backlog", label: "Backlog" },
+      { href: "/dashboard", label: "Project Dashboard" }, // All roles
+      { href: "/dashboard/prospects", label: "List of Prospects", allowedRoles: ["Superadmin", "Project Manager", "Project Administrator", "Account Manager"] },
+      { href: "/dashboard/projects", label: "List of Projects", allowedRoles: ["Superadmin", "Project Manager", "Project Administrator", "Account Manager"] },
+      { href: "/dashboard/backlog", label: "Backlog", allowedRoles: ["Superadmin", "Project Manager", "Project Administrator", "Account Manager"] },
     ],
   },
   {
     href: "/dashboard/user-management",
     label: "User Management",
     icon: Users,
+    allowedRoles: ["Superadmin"],
   },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
     <SidebarProvider>
-      <DashboardSidebarContent children={children} />
+      <DashboardSidebarContent>{children}</DashboardSidebarContent>
     </SidebarProvider>
   );
 }
@@ -68,8 +70,7 @@ function DashboardSidebarContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { state, setOpen } = useSidebar();
-  const { user, loading, session, signOut } = useAuthSession();
-  const [error, setError] = useState("");
+  const { user, loading, session, role, signOut } = useAuthSession();
 
   useEffect(() => {
     if (!loading && !session) {
@@ -127,39 +128,43 @@ function DashboardSidebarContent({ children }: { children: React.ReactNode }) {
         <SidebarContent>
           <SidebarGroup>
             <SidebarMenu>
-              {menuItems.map((item) => {
-                const Icon = item.icon;
-                const isActive = item.href ? pathname === item.href : item.subItems?.some(s => pathname === s.href);
-                const hasSubItems = !!item.subItems;
-                
-                if (item.subItems) {
-                  return (
-                    <Collapsible key={item.label} asChild defaultOpen={isActive} className="group/collapsible">
-                      <SidebarMenuItem>
-                        <CollapsibleTrigger asChild>
-                          <SidebarMenuButton tooltip={item.label} isActive={isActive} onClick={() => handleItemClick(true)}>
-                            <Icon />
-                            <span>{item.label}</span>
-                            <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
-                          </SidebarMenuButton>
-                        </CollapsibleTrigger>
-                        <CollapsibleContent>
-                          <SidebarMenuSub>
-                            {item.subItems.map((sub) => (
-                              <SidebarMenuSubItem key={sub.href}>
-                                <SidebarMenuSubButton asChild isActive={pathname === sub.href}>
-                                  <Link href={sub.href}>
-                                    <span>{sub.label}</span>
-                                  </Link>
-                                </SidebarMenuSubButton>
-                              </SidebarMenuSubItem>
-                            ))}
-                          </SidebarMenuSub>
-                        </CollapsibleContent>
-                      </SidebarMenuItem>
-                    </Collapsible>
-                  );
-                }
+              {menuItems
+                .filter(item => !item.allowedRoles || (role && item.allowedRoles.includes(role)))
+                .map((item) => {
+                  const Icon = item.icon;
+                  // Filter sub-items as well
+                  const filteredSubItems = item.subItems?.filter(sub => !sub.allowedRoles || (role && sub.allowedRoles.includes(role)));
+                  
+                  const isActive = item.href ? pathname === item.href : filteredSubItems?.some(s => pathname === s.href);
+                  
+                  if (filteredSubItems && filteredSubItems.length > 0) {
+                    return (
+                      <Collapsible key={item.label} asChild defaultOpen={isActive} className="group/collapsible">
+                        <SidebarMenuItem>
+                          <CollapsibleTrigger asChild>
+                            <SidebarMenuButton tooltip={item.label} isActive={isActive} onClick={() => handleItemClick(true)}>
+                              <Icon />
+                              <span>{item.label}</span>
+                              <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
+                            </SidebarMenuButton>
+                          </CollapsibleTrigger>
+                          <CollapsibleContent>
+                            <SidebarMenuSub>
+                              {filteredSubItems.map((sub) => (
+                                <SidebarMenuSubItem key={sub.href}>
+                                  <SidebarMenuSubButton asChild isActive={pathname === sub.href}>
+                                    <Link href={sub.href}>
+                                      <span>{sub.label}</span>
+                                    </Link>
+                                  </SidebarMenuSubButton>
+                                </SidebarMenuSubItem>
+                              ))}
+                            </SidebarMenuSub>
+                          </CollapsibleContent>
+                        </SidebarMenuItem>
+                      </Collapsible>
+                    );
+                  }
 
                 return (
                   <SidebarMenuItem key={item.href}>
@@ -181,7 +186,7 @@ function DashboardSidebarContent({ children }: { children: React.ReactNode }) {
               <SidebarMenuItem>
                 <SidebarMenuButton size="lg" className="w-full justify-start hover:bg-transparent cursor-default">
                   <div className="flex flex-col gap-0.5 leading-none overflow-hidden">
-                    <span className="text-xs text-muted-foreground truncate">Signed in as</span>
+                    <span className="text-xs text-muted-foreground truncate">Signed in as {role || "Member"}</span>
                     <span className="font-medium text-sm truncate">{user?.email ?? "Unknown user"}</span>
                   </div>
                 </SidebarMenuButton>
@@ -197,13 +202,6 @@ function DashboardSidebarContent({ children }: { children: React.ReactNode }) {
                 <span>Sign out</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
-            {error && (
-              <SidebarMenuItem>
-                <div className="p-2 text-xs text-destructive bg-destructive/10 rounded-md mt-2">
-                  {error}
-                </div>
-              </SidebarMenuItem>
-            )}
           </SidebarMenu>
         </SidebarFooter>
       </Sidebar>

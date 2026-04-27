@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import {
   PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, RadialBarChart, RadialBar,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid,
 } from "recharts";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -27,12 +27,6 @@ type Project = {
   budget_usage: number | null;
 };
 
-type ProjectTarget = {
-  account_manager: string | null;
-  gp_acc: number | null;
-  invoice_date: string | null;
-  batch_number: number | null;
-};
 
 type DashboardStatItem = { name: string; value: number };
 type DashboardBudgetItem = { name: string; budget: number; usage: number };
@@ -72,35 +66,6 @@ type DashboardSummaryRow = {
   total_gross_profit: number | string | null;
 };
 
-function buildAmAchievementData(targets: ProjectTarget[]): DashboardAchievementItem[] {
-  const amMap: Record<string, { target: number; actual: number }> = {};
-
-  targets.forEach((t) => {
-    // Exclude 2025 achievement rows from both target and invoiced values.
-    if (t.invoice_date && t.invoice_date.startsWith("2025")) return;
-
-    const am = t.account_manager?.trim() || "Unknown";
-    if (!amMap[am]) amMap[am] = { target: 0, actual: 0 };
-
-    const val = Number(t.gp_acc) || 0;
-    amMap[am].target += val;
-
-    // Match backlog default behavior: include as invoiced when invoice_date is not empty.
-    if (t.invoice_date && t.invoice_date.trim() !== "") {
-      amMap[am].actual += val;
-    }
-  });
-
-  return Object.entries(amMap)
-    .map(([name, vals]) => ({
-      name,
-      target: Math.round(vals.target / 1_000_000),
-      actual: Math.round(vals.actual / 1_000_000),
-      percent: vals.target > 0 ? Math.round((vals.actual / vals.target) * 100) : 0,
-    }))
-    .filter((item) => item.target > 0)
-    .sort((a, b) => b.target - a.target);
-}
 
 // ── Color helpers ──────────────────────────────────────────────────────────────
 const PQI_COLORS = {
@@ -156,12 +121,18 @@ function KpiCard({
 }
 
 // ── Custom Tooltip ─────────────────────────────────────────────────────────────
-const ChartTooltip = ({ active, payload, label }: any) => {
+interface ChartTooltipProps {
+  active?: boolean;
+  payload?: { name: string; value: number | string; color?: string; fill?: string }[];
+  label?: string;
+}
+
+const ChartTooltip = ({ active, payload, label }: ChartTooltipProps) => {
   if (active && payload && payload.length) {
     return (
       <div className="rounded-xl border-0 bg-foreground px-3 py-2 text-xs text-background shadow-lg">
         {label && <p className="font-semibold mb-1">{label}</p>}
-        {payload.map((p: any, i: number) => (
+        {payload.map((p, i) => (
           <div key={i} className="flex items-center gap-2">
             <span className="h-2 w-2 rounded-full" style={{ background: p.color || p.fill }} />
             <span className="text-background/70">{p.name}:</span>
@@ -200,7 +171,6 @@ const mapDashboardSummary = (row: DashboardSummaryRow): DashboardStats => {
 // ─────────────────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [targets, setTargets] = useState<ProjectTarget[]>([]);
   const [summaryStats, setSummaryStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -212,48 +182,18 @@ export default function DashboardPage() {
 
       try {
         const { data: summaryData, error: summaryError } = await supabase.rpc("get_dashboard_summary");
-        if (!summaryError) {
+        if (!summaryError && summaryData) {
           const row = Array.isArray(summaryData) ? summaryData[0] : summaryData;
           if (row) {
             rpcSummary = row as DashboardSummaryRow;
           }
         }
-      } catch {
-        // Fall back to the existing row-based calculations below.
-      }
-      
-      // Fetch Project Targets (latest batch only)
-      const { data: maxBatchData } = await supabase
-        .from("project_targets")
-        .select("batch_number")
-        .order("batch_number", { ascending: false })
-        .limit(1);
-      
-      const maxBatch = maxBatchData && maxBatchData.length > 0 ? maxBatchData[0].batch_number : null;
-      
-      let latestGrossProfit = 0;
-      let latestAmAchievementData: DashboardAchievementItem[] = [];
-
-      if (maxBatch !== null) {
-        const { data: targetData } = await supabase
-          .from("project_targets")
-          .select("account_manager, gp_acc, invoice_date, batch_number")
-          .eq("batch_number", maxBatch)
-          .or("invoice_date.is.null,invoice_date.lt.2025-01-01,invoice_date.gte.2026-01-01");
-        if (targetData) {
-          const normalizedTargets = targetData as ProjectTarget[];
-          setTargets(normalizedTargets);
-          latestGrossProfit = normalizedTargets.reduce((acc, curr) => acc + (Number(curr.gp_acc) || 0), 0);
-          latestAmAchievementData = buildAmAchievementData(normalizedTargets);
-        }
+      } catch (err) {
+        console.error("RPC failed, falling back to manual computation:", err);
       }
 
       if (rpcSummary) {
-        setSummaryStats({
-          ...mapDashboardSummary(rpcSummary),
-          amAchievementData: latestAmAchievementData,
-          totalGrossProfit: latestGrossProfit,
-        });
+        setSummaryStats(mapDashboardSummary(rpcSummary));
       } else {
         // Fetch Projects only when RPC is unavailable and we must compute fallback stats.
         const { data: maxProjBatchData } = await supabase
@@ -367,18 +307,15 @@ export default function DashboardPage() {
         usage:  Math.round((p.budget_usage  ?? 0) / 1_000_000),
       }));
 
-    const amAchievementData = buildAmAchievementData(targets);
-
-    const totalGrossProfit = targets
-      .filter((target) => !(target.invoice_date && target.invoice_date.startsWith("2025")))
-      .reduce((acc, curr) => acc + (Number(curr.gp_acc) || 0), 0);
+    const amAchievementData: DashboardAchievementItem[] = [];
+    const totalGrossProfit = 0;
 
     return {
       total, avgProgress, avgPqiTime, avgPqiCost,
       pqiTimeData, pqiCostData,
       progressData, pmData, catData, budgetData, amAchievementData, totalGrossProfit,
     };
-  }, [projects, targets]);
+  }, [projects]);
 
   const stats = summaryStats ?? fallbackStats;
 

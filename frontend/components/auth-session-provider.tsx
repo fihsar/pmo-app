@@ -15,6 +15,7 @@ type AuthSessionContextValue = {
   session: Session | null;
   user: User | null;
   loading: boolean;
+  role: string | null;
   signOut: () => Promise<void>;
   refreshSession: () => Promise<void>;
 };
@@ -23,10 +24,12 @@ const AuthSessionContext = createContext<AuthSessionContextValue | undefined>(un
 
 export function AuthSessionProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
+  const [role, setRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLoading(false);
       return;
     }
@@ -44,6 +47,18 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
       }
 
       setSession(data.session);
+      
+      if (data.session?.user) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("user_id", data.session.user.id)
+          .maybeSingle();
+        if (active) setRole(profile?.role ?? null);
+      } else {
+        setRole(null);
+      }
+
       setLoading(false);
     };
 
@@ -55,7 +70,21 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
       if (!active) return;
 
       setSession(currentSession);
-      setLoading(false);
+      
+      if (currentSession?.user) {
+        void supabase
+          .from("profiles")
+          .select("role")
+          .eq("user_id", currentSession.user.id)
+          .maybeSingle()
+          .then(({ data: profile }) => {
+            if (active) setRole(profile?.role ?? null);
+            setLoading(false);
+          });
+      } else {
+        setRole(null);
+        setLoading(false);
+      }
     });
 
     return () => {
@@ -80,10 +109,11 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
       session,
       user: session?.user ?? null,
       loading,
+      role,
       signOut,
       refreshSession,
     }),
-    [loading, session]
+    [loading, session, role]
   );
 
   return <AuthSessionContext.Provider value={value}>{children}</AuthSessionContext.Provider>;

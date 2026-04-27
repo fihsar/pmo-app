@@ -4,171 +4,72 @@
 The **PMO App** is a project management dashboard for PT Q2 Technologies. It tracks projects, prospects, and backlog/target data from Excel uploads and presents the latest operational and financial status in a Next.js UI backed by Supabase/PostgreSQL.
 
 ### Tech Stack
-- **Framework:** Next.js App Router
-- **Language:** TypeScript
-- **Styling:** Tailwind CSS + Shadcn/UI
-- **Charts:** Recharts
-- **Database:** Supabase (PostgreSQL)
-- **Ingestion:** Excel parsing with `xlsx`
+- **Frontend:** Next.js 14 (App Router), TypeScript, Tailwind CSS, Shadcn/UI, Recharts.
+- **Backend (API/Tools):** Go 1.21+ (organized into `cmd/` binaries for ingestion and summary tools).
+- **Database:** Supabase (PostgreSQL) with advanced SQL RPCs and triggers.
+- **Security:** Supabase Auth + Granular Role-Based Access Control (RBAC).
 
-## 2. Current App Status
-The app is now in a better performance state than the original version.
+## 2. Core Architecture & Performance (April 2026 Update)
+The application has been refactored into a high-performance "Zero-Row" architecture.
 
-- The main dashboard summary is no longer computed entirely in the browser. It now prefers the SQL RPC `get_dashboard_summary()` and only falls back to client-side aggregation if the RPC fails.
-- The Projects, Prospects, and Backlog pages were moved away from large client-side scan/filter/sort loops and now use server-side paging, filtering, and counts.
-- The batch mismatch that caused `column prospects.batch_number does not exist` has been fixed by adding the missing schema fields and aligning the upload/query path.
-- The latest production build now passes locally with `frontend npm run build`; the Vercel failure was caused by strict TypeScript checks in the dashboard and prospects pages, not by Vercel config.
-- The dashboard total gross profit now uses the same latest-batch `gp_acc` sum as the backlog subtotal so the two screens stay in sync.
-- The dashboard fallback path now parses `gp_acc` numerically before summing so it does not drift if Supabase returns numeric columns as strings.
-- The dashboard now overrides the RPC gross-profit field with a local sum from the latest `project_targets` batch, so the displayed total always matches the backlog calculation.
-- The dashboard no longer shows Schedule Health or Financial Health panels, and the first KPI is now GP Achievement (%) against a 36,000,000,000 gross-profit target.
-- Dashboard Sales Performance (AM achievement and total gross profit) now uses the same default row logic as Backlog: latest `project_targets` batch, total `gp_acc`, and `invoice_date`-not-empty for invoiced values.
-- Both Dashboard and Backlog now exclude rows where `invoice_date` is in year 2025 from achievement/gross-profit calculations to keep reporting scope consistent.
-- Dashboard now skips the full `projects` fallback query when RPC summary is available, reducing unnecessary load while preserving the fallback path.
-- Login/session handling is now centralized in a shared Supabase auth provider, so the app keeps session state consistent across the login page, dashboard layout, and route redirects.
-- The classification logic for FCC/CSS is centralized and updated with the requested keyword additions.
-- The "VA" (Virtual Account vs. Vulnerability Assessment) ambiguity has been resolved by adding banking-specific keywords to FCC strict overrides.
-- Backlog page now uses the unified classification library and respects existing database categories to ensure consistency between server-side filters and UI display.
-- Workbook files are no longer meant to stay tracked in the repo. A root `.gitignore` now ignores `*.xlsx`, and the stray workbook binaries were removed from the workspace.
+- **Zero-Row Dashboard:** The dashboard no longer downloads individual project or target records. All KPIs, AM Achievement charts, and Gross Profit totals are computed via the `get_dashboard_summary()` RPC on the server.
+- **Centralized Batch Metadata:** To eliminate expensive `MAX(batch_number)` scans, a `batch_metadata` table tracks the latest upload version for all data types. This is kept in sync via database triggers, providing O(1) version lookups.
+- **Server-Side Aggregations:** Both **Backlog** and **Prospects** pages now use dedicated RPCs (`get_backlog_subtotals`, `get_prospects_subtotals`) to compute global financial sums across the entire filtered dataset, rather than just the visible page.
+- **Search Debouncing:** A 500ms debounce is applied to all text searches to protect the database from query floods during typing.
+- **Latency Monitoring:** Every data fetch logs precise query latency (in ms) to the browser console for real-time performance telemetry.
 
-## 3. Main Functional Areas
+## 3. Security & Access Control
+- **Role-Based Access Control (RBAC):** Implemented a granular Access Matrix in `frontend/app/dashboard/layout.tsx`.
+    - **Member:** Restricted to the Project Dashboard only.
+    - **PM/AM/Admin:** Access to Projects, Prospects, and Backlog.
+    - **Superadmin:** Full access, including User Management.
+- **Sidebar Integration:** The sidebar dynamically filters navigation items based on the user's assigned role.
+- **Server-Side Enforcement:** RBAC is reinforced at the RPC and API levels, ensuring users cannot access data outside their scope via direct queries.
+
+## 4. Backend Reorganization
+The Go backend has been restructured to resolve "multiple main() entrypoints" conflicts:
+- **`cmd/api`**: Main Go API entry point.
+- **`cmd/setup-db`**: Database initialization and schema sync.
+- **`cmd/dashboard-summary`**: Offline summary generation (if needed).
+- **`cmd/prospects-schema`**: Specific schema management tool.
+Standardized `go.mod` at the root ensures consistent dependency management.
+
+## 5. Feature Breakdown
 ### Dashboard
-The dashboard page now reads aggregated values from `backend/dashboard_summary.sql` through a Supabase RPC.
+- **GP Achievement:** KPI tracking against a 36,000,000,000 IDR target.
+- **Sales Performance:** Server-aggregated AM achievement chart (Invoiced vs. Target).
+- **Global Filters:** Automatically excludes 2025 invoice data from all financial totals to ensure reporting consistency.
 
-What it returns:
-- total project count
-- GP Achievement (%) based on total gross profit versus the 36,000,000,000 target
-- average PQI time and PQI cost
-- progress distribution
-- project manager and category breakdowns
-- budget chart data
-- AM achievement data
-- total gross profit
+### Projects & Prospects
+- **Server-Side Paging:** Handles thousands of rows with minimal memory footprint.
+- **Trigram Search:** Prospects table uses `pg_trgm` indexes for fast multi-field text search.
+- **Ingestion-Time Classification:** Categories (FCC/CSS) are determined during upload and stored, though the UI can still re-classify on the fly if keywords change.
 
-Important detail:
-- The SQL summary only uses the latest batch for projects and project targets, so the UI always shows current uploaded data rather than mixing historical batches.
+### Backlog (Project Targets)
+- **Status Persistence:** Allows manual tracking of "On Track", "At Risk", or "Delayed" statuses.
+- **Financial Export:** Optimized Excel export that respects all active search/date/category filters.
 
-Session detail:
-- The dashboard layout now uses the shared auth session provider to check the logged-in user and redirect unauthenticated visitors back to the root login page.
+## 6. Schema And Database Changes
+- **`batch_metadata`**: Stores `latest_batch` per table.
+- **Triggers**: `tr_update_projects_batch`, `tr_update_targets_batch`, `tr_update_prospects_batch`.
+- **RPCs**:
+    - `get_dashboard_summary()`: Unified KPI and Sales aggregation.
+    - `get_latest_batch(table_id)`: Instant version lookup.
+    - `get_backlog_subtotals()`: Server-side financial sums for Backlog.
+    - `get_prospects_subtotals()`: Server-side financial sums for Prospects.
 
-### Projects
-Projects now use server-side query logic for list rendering instead of pulling everything into the client and filtering there.
+## 7. Performance Indices
+- **B-Tree Indices**: On `batch_number`, `am_name`, `target_date`, and `category`.
+- **Trigram Indices**: On `prospect_name` and `client_name` for fast fuzzy searching.
 
-The page still handles:
-- upload/import
-- latest-batch selection
-- search and filtering
-- sorting and paging
-- classification display
-
-### Prospects
-Prospects follow the same server-side filtering model as Projects.
-
-The earlier schema issue was addressed by adding `batch_number` and `upload_date` to the prospects table and supporting indexes.
-
-### Backlog
-Backlog/project targets also use server-side filtering and paging now. It keeps its existing OPR/DEL classification behavior and preserves subtotal logic for the visible filtered set.
-
-## 4. Classification Logic
-The shared classification engine was updated so both Projects and Prospects classify more accurately.
-
-### Existing behavior
-The logic still uses a priority order of strict overrides, column-based signals, then keyword matching.
-
-### Updated keywords
-CSS now includes the requested terms:
-- HCL
-- Bussan Auto Finance
-- VA
-- VA Bulk
-- Project Manager BaU
-- Privileged Access Management
-- Data Loss Prevention
-- DLP
-- Forcepoint
-- Fazpass
-- CipherTrust
-- Proxy
-- Third Party Assesment
-- Audit
-
-The Prospects list also recomputes the displayed category from the prospect name so older rows stored as `UNCLASSIFIED` can render as CSS when they match the shared classifier.
-Keywords such as Data Loss Prevention, DLP, Forcepoint, Fazpass, and CipherTrust are now treated as strict CSS overrides so they do not fall back to `UNCLASSIFIED` in split-keyword cases.
-Backlog now also treats project names containing `Microfocus Fortify`, `Microfocus`, or `Fortify` as CSS overrides and reapplies category mapping on loaded rows so stale stored categories do not persist in the UI.
-- The backlog page has been reverted back to server-side filtering for performance reasons. Client-side filtering was causing pagination issues and poor performance with large datasets.
-- Added new database schema requirement: `backend/add_category_columns.sql` adds `category` and `category_note` columns to the `project_targets` table to enable server-side category filtering.
-- Server-side category filtering simplified to only filter by the `category` field. FCC, CSS, and other category filters now strictly match their respective category values (`category.eq.FCC`, `category.eq.CSS`).
-- UNCLASSIFIED filter matches items with `category.eq.UNCLASSIFIED`, `category.is.null`, or empty category values.
-- This approach ensures items are only shown in their assigned category filter, preventing miscategorization issues where CSS items were appearing in FCC results.
-- Pagination is now handled server-side again, ensuring proper performance with hundreds of records and correct total counts.
-
-FCC now includes the requested terms:
-- Gowap
-- IFMX
-- Garuda
-- CIMB Berhad
-- Book of Octo
-
-### VA Ambiguity Resolution
-`VA` is treated carefully to avoid false positives:
-- The general `va` keyword remains a CSS indicator (Vulnerability Assessment).
-- Specific FCC overrides were added for banking contexts: `virtual account`, `va bni`, `va bri`, `va mandiri`, and `va bca`.
-- This ensures PID Q2TC240012 and similar banking projects are correctly classified as FCC.
-
-### Unified Classification
-- The Backlog page no longer uses local duplicate logic. It imports from `@/lib/classification`.
-- The classifier now respects existing non-UNCLASSIFIED categories stored in the database, ensuring that if a record was filtered as "FCC" on the server, it remains "FCC" in the UI.
-
-## 5. Schema And Database Changes
-These database updates were part of the fix and performance work:
-
-- `prospects` now has `batch_number` and `upload_date`.
-- `projects`, `prospects`, and `project_targets` have batch/recency indexes for faster latest-batch lookups.
-- `backend/add_batch_columns.sql` was extended so the prospects table is included.
-- `backend/dashboard_summary.sql` defines `public.get_dashboard_summary()` for the dashboard RPC.
-
-## 6. Files That Matter Most
-- [backend/dashboard_summary.sql](/Users/fihsar/pmo-app/backend/dashboard_summary.sql)
-- [backend/add_batch_columns.sql](/Users/fihsar/pmo-app/backend/add_batch_columns.sql)
-- [backend/projects_schema.sql](/Users/fihsar/pmo-app/backend/projects_schema.sql)
-- [backend/prospects_schema.sql](/Users/fihsar/pmo-app/backend/prospects_schema.sql)
-- [backend/project_targets_schema.sql](/Users/fihsar/pmo-app/backend/project_targets_schema.sql)
-- [frontend/components/auth-session-provider.tsx](/Users/fihsar/pmo-app/frontend/components/auth-session-provider.tsx)
-- [frontend/app/dashboard/page.tsx](/Users/fihsar/pmo-app/frontend/app/dashboard/page.tsx)
-- [frontend/app/dashboard/projects/page.tsx](/Users/fihsar/pmo-app/frontend/app/dashboard/projects/page.tsx)
-- [frontend/app/dashboard/prospects/page.tsx](/Users/fihsar/pmo-app/frontend/app/dashboard/prospects/page.tsx)
-- [frontend/app/dashboard/backlog/page.tsx](/Users/fihsar/pmo-app/frontend/app/dashboard/backlog/page.tsx)
-- [frontend/lib/classification.ts](/Users/fihsar/pmo-app/frontend/lib/classification.ts)
-
-## 7. Repo Hygiene
-- Workbook artifacts should not be committed.
-- The workspace `.gitignore` now ignores `*.xlsx`.
-- The previous workbook binaries were removed from the workspace to keep the repo clean.
-- `frontend` was previously stored as a gitlink entry, which made GitHub show it as a pointer instead of normal folder contents; it is now being tracked as regular files in the root repo.
-
-## 8. Remaining Follow-Ups
-- Add or strengthen tests around the dashboard RPC mapping and the upload header validation paths.
-- Consider whether the dashboard fallback path is still needed long-term, or whether the RPC should become the single source of truth.
-- If more Excel template files appear during work, keep them ignored or out of the repo.
-- Session lifetime is controlled in the Supabase dashboard, not in the app code; check Auth settings for time-boxed sessions, inactivity timeout, single-session limits, and JWT expiration.
-- Vercel deployment should target the `frontend` app root; if you later split backend logic into its own deployed service, create a separate Vercel project for that service instead of trying to run both from one Next.js deployment.
+## 8. Repo Hygiene & Quality
+- **Lint-Zero Status**: All TypeScript warnings, unused imports, and `any` types have been resolved.
+- **Effect Stabilization**: All `loadData` functions are wrapped in `useCallback` to prevent infinite re-render loops.
+- **Binary Exclusion**: Workbook files (`.xlsx`) are strictly ignored via `.gitignore`.
 
 ## 9. Guidance For Future Agents
-- After every code or schema change, update this handoff with what changed and the next step before moving on.
-- Keep the Vercel config aligned with the frontend app root, and use separate Vercel projects for any additional services.
-- Keep the shared auth session provider in sync with any future login or logout flow changes.
-- Keep dashboard aggregation in SQL where possible; avoid reintroducing large client-side reductions.
-- Preserve the latest-batch model across list pages and summary logic.
-- When changing FCC/CSS classification, update the shared classification source and verify both Projects and Prospects still agree.
-- Always check for keyword collisions (like `VA`) when adding new classification rules.
-- Prefer narrow, server-side queries for large tables instead of loading full datasets into the client.
-- Ensure any property access on records in `lib/classification.ts` uses bracket notation (`row["key"]`) to maintain TypeScript compliance for `Record<string, unknown>`.
-
-## 10. Performance & Feature Update (April 2026)
-- **Ingestion-Time Classification**: Projects, Prospects, and Backlog now perform classification **once** during Excel upload. Results are stored in the database (`category` and `category_note` columns).
-- **Optimized UI**: Redundant client-side re-classification loops were removed from list pages. The UI now relies on indexed database columns, significantly improving responsiveness for large datasets.
-- **Unified Header Styling**: Projects, Prospects, and Backlog pages now share a consistent header design ("All [Type]" with count subtitles and integrated status messages).
-- **Excel Export**: Added a specialized Excel export to the Backlog page. It allows users to download filtered data with core project details plus the system-calculated `CATEGORY` and `STATUS`.
-- **Status Tracking**: Backlog items now have a functional `status` dropdown (On Track, At Risk, Delayed) backed by database persistence and RLS update policies.
-- **Final UI Polish**: Centered the Category column on all list pages for better visual balance. Renamed "Export Excel" to "Export Data" across the application.
-- **Export Integrity Fix**: Resolved an issue in the Prospects module where the export included records not visible in the web dashboard. The export now correctly applies the Account Manager visibility filter.
+- **Metadata First**: Always check `batch_metadata` or use `get_latest_batch()` before querying data.
+- **RPC over Client**: If a calculation involves more than one page of data, move it to a SQL RPC.
+- **Constants Location**: Keep static configuration (like AM lists or keyword patterns) **outside** component definitions to avoid re-render loops.
+- **RBAC Matrix**: Any new page must be registered in the `Access Matrix` in `frontend/app/dashboard/layout.tsx`.
+- **Latency Awareness**: Monitor the console logs for "Query latency" to detect performance regressions early.
