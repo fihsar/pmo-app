@@ -43,3 +43,8 @@ ON public.project_targets FOR SELECT TO authenticated USING (true);
 -- Policy to allow all authenticated users to insert project targets
 CREATE POLICY "Allow authenticated insert access" 
 ON public.project_targets FOR INSERT TO authenticated WITH CHECK (true);
+
+-- Performance indexes for latest-batch and recency lookups
+CREATE INDEX IF NOT EXISTS idx_project_targets_batch_number ON public.project_targets (batch_number);
+CREATE INDEX IF NOT EXISTS idx_project_targets_created_at ON public.project_targets (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_project_targets_batch_created_at ON public.project_targets (batch_number, created_at DESC);

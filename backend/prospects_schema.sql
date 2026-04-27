@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS public.prospects (
     confidence_level NUMERIC,
     osv_non_osl NUMERIC,
     opr_del NUMERIC,
+    batch_number INTEGER DEFAULT 1,
+    upload_date TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
@@ -42,3 +44,8 @@ ON public.prospects FOR UPDATE TO authenticated USING (true);
 -- Policy to allow all authenticated users to delete prospects
 CREATE POLICY "Allow authenticated delete access" 
 ON public.prospects FOR DELETE TO authenticated USING (true);
+
+-- Performance indexes for latest-batch and recency lookups
+CREATE INDEX IF NOT EXISTS idx_prospects_batch_number ON public.prospects (batch_number);
+CREATE INDEX IF NOT EXISTS idx_prospects_created_at ON public.prospects (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_prospects_batch_created_at ON public.prospects (batch_number, created_at DESC);
