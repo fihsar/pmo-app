@@ -77,6 +77,18 @@ const parseNumeric = (value: unknown): number | null => {
   return isNaN(num) ? null : num;
 };
 
+const parseText = (value: unknown): string | null => {
+  if (value === undefined || value === null) return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return null;
+};
+
 const formatDate = (dateStr: string | null): string => {
   if (!dateStr) return "-";
   const parts = dateStr.split("-");
@@ -88,7 +100,7 @@ const formatDate = (dateStr: string | null): string => {
 };
 
 const isMissingBatchColumnError = (error: unknown): boolean => {
-  const msg = String(error?.message || "").toLowerCase();
+  const msg = error instanceof Error ? error.message.toLowerCase() : String(error ?? "").toLowerCase();
   return msg.includes("batch_number") && msg.includes("does not exist");
 };
 
@@ -339,16 +351,16 @@ export default function ProspectsPage() {
         const categoryResult = determineCategory(row);
         return {
         id_top_sales: parseNumeric(row["ID_TOP_SALES"]),
-        am_name: row["AM_NAME"] || null,
-        company_name: row["COMPANY_NAME"] || null,
-        directorat: row["DIRECTORAT"] || null,
-        group_name: row["GROUP_NAME"] || null,
-        id_project: row["ID_PROJECT"] || null,
+        am_name: parseText(row["AM_NAME"]),
+        company_name: parseText(row["COMPANY_NAME"]),
+        directorat: parseText(row["DIRECTORAT"]),
+        group_name: parseText(row["GROUP_NAME"]),
+        id_project: parseText(row["ID_PROJECT"]),
         id_prospect_status: parseNumeric(row["ID_PROSPECT_STATUS"]),
-        prospect_name: row["PROSPECT_NAME"] || null,
-        client_name: row["CLIENT_NAME"] || null,
-        status: row["STATUS"] || null,
-        term_of_payment: row["TERM_OF_PAYMENT"] || null,
+        prospect_name: parseText(row["PROSPECT_NAME"]),
+        client_name: parseText(row["CLIENT_NAME"]),
+        status: parseText(row["STATUS"]),
+        term_of_payment: parseText(row["TERM_OF_PAYMENT"]),
         amount: parseNumeric(row[" AMOUNT "] ?? row["AMOUNT"]),
         gp: parseNumeric(row[" GP "] ?? row["GP"]),
         amount_cl: parseNumeric(row[" AMOUNT_CL "] ?? row["AMOUNT_CL"]),

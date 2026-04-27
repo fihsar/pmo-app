@@ -87,6 +87,18 @@ const parseNumeric = (value: unknown): number | null => {
   return isNaN(num) ? null : num;
 };
 
+const parseText = (value: unknown): string | null => {
+  if (value === undefined || value === null) return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return null;
+};
+
 const formatDate = (dateStr: string | null): string => {
   if (!dateStr) return "-";
   const parts = dateStr.split("-");
@@ -339,34 +351,34 @@ export default function ProjectTargetPage() {
       
       const newTargets: ProjectTarget[] = json.map((row) => ({
         target_id: parseNumeric(row["ID"]),
-        company_name: row["COMPANY_NAME"] || null,
-        project_id: row["PROJECT_ID"] || null,
-        customer: row["CUSTOMER"] || null,
-        project_name: row["PROJECT_NAME"] || null,
-        project_manager: row["PROJECT_MANAGER"] || null,
-        account_manager: row["ACCOUNT_MANAGER"] || null,
-        group_am: row["GROUP_AM"] || null,
-        is_po: row["IS_PO"] || null,
-        is_contract: row["IS_CONTRACT"] || null,
-        term_of_payment_sales: row["TERM_OF_PAYMENT_SALES"] || null,
-        invoice_status: row["INVOICE_STATUS"] || null,
-        project_category: row["PROJECT_CATEGORY"] || null,
-        project_tracking: row["PROJECT_TRACKING"] || null,
+        company_name: parseText(row["COMPANY_NAME"]),
+        project_id: parseText(row["PROJECT_ID"]),
+        customer: parseText(row["CUSTOMER"]),
+        project_name: parseText(row["PROJECT_NAME"]),
+        project_manager: parseText(row["PROJECT_MANAGER"]),
+        account_manager: parseText(row["ACCOUNT_MANAGER"]),
+        group_am: parseText(row["GROUP_AM"]),
+        is_po: parseText(row["IS_PO"]),
+        is_contract: parseText(row["IS_CONTRACT"]),
+        term_of_payment_sales: parseText(row["TERM_OF_PAYMENT_SALES"]),
+        invoice_status: parseText(row["INVOICE_STATUS"]),
+        project_category: parseText(row["PROJECT_CATEGORY"]),
+        project_tracking: parseText(row["PROJECT_TRACKING"]),
         total: parseNumeric(row["TOTAL"]),
         gp_acc: parseNumeric(row["GP_ACC"]),
         net_profit_project: parseNumeric(row["NET_PROFIT_PROJECT"]),
         npp_actual: parseNumeric(row["NPP_ACTUAL"]),
         client_po_date: parseDate(row["CLIENT_PO_DATE"]),
-        invoice_number: row["INVOICE_NUMBER"] || null,
+        invoice_number: parseText(row["INVOICE_NUMBER"]),
         invoice_date: parseDate(row["INVOICE_DATE"]),
         payment_date: parseDate(row["PAYMENT_DATE"]),
         target_date: parseDate(row["TARGET_DATE"]),
         target_invoice_r0: parseDate(row["TARGET_INVOICE_R0"]),
         aging_invoice: parseNumeric(row["AGING_INVOICE"]),
         count_target_change: parseNumeric(row["COUNT_TARGET_CHANGE"]),
-        history_update_target_date: row["HISTORY_UPDATE_TARGET_DATE"] || null,
+        history_update_target_date: parseText(row["HISTORY_UPDATE_TARGET_DATE"]),
         last_update: parseDate(row["LAST_UPDATE"]),
-        reason_update: row["REASON_UPDATE"] || null,
+        reason_update: parseText(row["REASON_UPDATE"]),
         category: determineCategory(row).category,
         category_note: determineCategory(row).category_note,
       }));

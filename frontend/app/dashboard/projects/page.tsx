@@ -135,27 +135,31 @@ const pickNumeric = (obj: Record<string, unknown>, keys: string[]): number | nul
   return null;
 };
 
-const normalizeProject = (project: Record<string, unknown>): Project => ({
-  ...project,
-  percentage_progress: pickNumeric(project, [
-    "percentage_progress",
-    "PERCENTAGE_PROGRESS",
-    "Percentage Progress",
-  ]),
-  pqi_time: pickNumeric(project, [
-    "pqi_time",
-    "PQI_TIME",
-    "PQI Time",
-  ]),
-  pqi_cost: pickNumeric(project, [
-    "pqi_cost",
-    "PQI_COST",
-    "PQI Cost",
-  ]),
-});
+const normalizeProject = (project: Record<string, unknown>): Project => {
+  const normalized = {
+    ...project,
+    percentage_progress: pickNumeric(project, [
+      "percentage_progress",
+      "PERCENTAGE_PROGRESS",
+      "Percentage Progress",
+    ]),
+    pqi_time: pickNumeric(project, [
+      "pqi_time",
+      "PQI_TIME",
+      "PQI Time",
+    ]),
+    pqi_cost: pickNumeric(project, [
+      "pqi_cost",
+      "PQI_COST",
+      "PQI Cost",
+    ]),
+  };
+
+  return normalized as Project;
+};
 
 const isMissingBatchColumnError = (error: unknown): boolean => {
-  const msg = String(error?.message || "").toLowerCase();
+  const msg = error instanceof Error ? error.message.toLowerCase() : String(error ?? "").toLowerCase();
   return msg.includes("batch_number") && msg.includes("does not exist");
 };
 

@@ -5,6 +5,14 @@ export type CategoryResult = {
   category_note: "strict-override" | "col-based" | "keyword-based" | "split" | "manual-review";
 };
 
+const CATEGORY_NOTES: CategoryResult["category_note"][] = [
+  "strict-override",
+  "col-based",
+  "keyword-based",
+  "split",
+  "manual-review",
+];
+
 const STRICT_FCC_KEYWORDS = [
   "ifmx",
   "fraud",
@@ -259,6 +267,14 @@ function hasKeyword(text: string, keywords: string[]): boolean {
   });
 }
 
+function parseCategoryNote(value: unknown): CategoryResult["category_note"] | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  return CATEGORY_NOTES.includes(normalized as CategoryResult["category_note"])
+    ? (normalized as CategoryResult["category_note"])
+    : null;
+}
+
 export function determineCategory(row: Record<string, unknown>): CategoryResult {
   const existingCategory = String(readFirst(row, ["category", "CATEGORY", "project_category"]) || "");
   const name = normalizeText(readFirst(row, ["PROJECT_NAME", "PROSPECT_NAME", "project_name", "prospect_name"]));
@@ -276,7 +292,7 @@ export function determineCategory(row: Record<string, unknown>): CategoryResult 
   if (existingCategory === "FCC" || existingCategory === "CSS") {
     return { 
       category: existingCategory as Category, 
-      category_note: (row["category_note"] as string | null) || "col-based" 
+      category_note: parseCategoryNote(row["category_note"]) ?? "col-based",
     };
   }
 
