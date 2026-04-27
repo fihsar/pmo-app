@@ -294,6 +294,35 @@ export default function ProjectTargetPage() {
       const worksheet = workbook.Sheets[sheetName];
       
       const json = XLSX.utils.sheet_to_json(worksheet, { defval: null }) as Record<string, unknown>[];
+
+      if (json.length === 0) {
+        throw new Error("Invalid Backlog template: file is empty or has no data rows.");
+      }
+
+      const headers = Object.keys(json[0]).map((h) => h.trim().toUpperCase());
+      const requiredBacklogHeaders = ["PROJECT_ID", "PROJECT_NAME", "ACCOUNT_MANAGER", "TARGET_DATE", "GP_ACC"];
+      const missingBacklogHeaders = requiredBacklogHeaders.filter((h) => !headers.includes(h));
+
+      if (missingBacklogHeaders.length > 0) {
+        const looksLikeProjectsTemplate = ["PERCENTAGE_PROGRESS", "PQI_TIME", "PQI_COST"].every((h) => headers.includes(h));
+        const looksLikeProspectsTemplate = ["AM_NAME", "PROSPECT_NAME", "CLIENT_NAME", "STATUS"].every((h) => headers.includes(h));
+
+        if (looksLikeProjectsTemplate) {
+          throw new Error(
+            "Wrong template: this looks like Projects data. Upload this file on the Projects page."
+          );
+        }
+
+        if (looksLikeProspectsTemplate) {
+          throw new Error(
+            "Wrong template: this looks like Prospects data. Upload this file on the Prospects page."
+          );
+        }
+
+        throw new Error(
+          `Invalid Backlog template. Missing required columns: ${missingBacklogHeaders.join(", ")}`
+        );
+      }
       
       const newTargets: ProjectTarget[] = json.map((row) => ({
         target_id: parseNumeric(row["ID"]),
@@ -336,14 +365,14 @@ export default function ProjectTargetPage() {
         return;
       }
 
-      // Get max batch number to determine next batch
-      const { data: maxBatchData } = await supabase
-        .from("project_targets")
-        .select("batch_number")
-        .order("batch_number", { ascending: false })
-        .limit(1);
+      // Get current latest batch from metadata to determine next batch
+      const { data: maxBatch, error: maxBatchError } = await supabase.rpc("get_latest_batch", { p_table_id: "targets" });
+
+      if (maxBatchError) {
+        throw new Error(`Failed to determine latest batch: ${maxBatchError.message}`);
+      }
         
-      const nextBatch = (maxBatchData && maxBatchData.length > 0 ? maxBatchData[0].batch_number : 0) + 1;
+      const nextBatch = (maxBatch || 0) + 1;
       
       const newTargetsWithBatch = newTargets.map(target => ({
         ...target,

@@ -60,6 +60,16 @@ const allowedAMs = [
   "Pandu R Akbar"
 ];
 
+const normalizeAMKey = (value: string) => value.trim().toLowerCase();
+
+const allowedAMMap = new Map(allowedAMs.map((am) => [normalizeAMKey(am), am]));
+
+const toCanonicalAM = (value: string | null): string | null => {
+  if (!value) return null;
+  const trimmed = value.trim();
+  return allowedAMMap.get(normalizeAMKey(trimmed)) ?? trimmed;
+};
+
 const cssNameFallbackPatterns = [
   "%Managed Service%",
   "%Internet Service%",
@@ -292,12 +302,59 @@ export default function ProspectsPage() {
       const worksheet = workbook.Sheets[sheetName];
       
       const json = XLSX.utils.sheet_to_json(worksheet, { defval: null }) as Record<string, unknown>[];
+
+      if (json.length === 0) {
+        throw new Error("Invalid Prospects template: file is empty or has no data rows.");
+      }
+
+      const headers = Object.keys(json[0]).map((h) => h.trim().toUpperCase());
+      const requiredProspectsHeaders = ["AM_NAME", "PROSPECT_NAME", "CLIENT_NAME", "TARGET_DATE"];
+      const missingProspectsHeaders = requiredProspectsHeaders.filter((h) => !headers.includes(h));
+      const hasGpHeader = headers.includes("GP") || headers.includes(" GP ");
+
+      if (missingProspectsHeaders.length > 0 || !hasGpHeader) {
+        const looksLikeProjectsTemplate = ["PERCENTAGE_PROGRESS", "PQI_TIME", "PQI_COST"].every((h) => headers.includes(h));
+        const looksLikeBacklogTemplate = ["PROJECT_ID", "TARGET_DATE", "GP_ACC", "INVOICE_DATE"].every((h) => headers.includes(h));
+
+        if (looksLikeProjectsTemplate) {
+          throw new Error(
+            "Wrong template: this looks like Projects data. Upload this file on the Projects page."
+          );
+        }
+
+        if (looksLikeBacklogTemplate) {
+          throw new Error(
+            "Wrong template: this looks like Backlog data. Upload this file on the Backlog page."
+          );
+        }
+
+        const missing = [...missingProspectsHeaders, ...(hasGpHeader ? [] : ["GP"])];
+        throw new Error(
+          `Invalid Prospects template. Missing required columns: ${missing.join(", ")}`
+        );
+      }
       
+      // AM validation is now non-blocking as per user request.
+      // We still track unknown AMs for potential logging/debugging but we don't throw.
+      const unknownAMs = Array.from(new Set(
+        json
+          .map((row) => parseText(row["AM_NAME"]))
+          .filter((rawName): rawName is string => {
+            if (!rawName) return false;
+            return !allowedAMMap.has(normalizeAMKey(rawName));
+          })
+      ));
+
+      if (unknownAMs.length > 0) {
+        console.warn(`Uploading with ${unknownAMs.length} unrecognized AM names:`, unknownAMs);
+      }
+
       const newProspects: Prospect[] = json.map((row) => {
         const categoryResult = determineCategory(row);
+        const canonicalAMName = toCanonicalAM(parseText(row["AM_NAME"]));
         return {
         id_top_sales: parseNumeric(row["ID_TOP_SALES"]),
-        am_name: parseText(row["AM_NAME"]),
+        am_name: canonicalAMName,
         company_name: parseText(row["COMPANY_NAME"]),
         directorat: parseText(row["DIRECTORAT"]),
         group_name: parseText(row["GROUP_NAME"]),
@@ -328,22 +385,14 @@ export default function ProspectsPage() {
         return;
       }
 
-      const { data: maxBatchData, error: maxBatchError } = await supabase
-        .from("prospects")
-        .select("batch_number")
-        .order("batch_number", { ascending: false })
-        .limit(1);
+      // Get current latest batch from metadata to determine next batch
+      const { data: maxBatch, error: maxBatchError } = await supabase.rpc("get_latest_batch", { p_table_id: "prospects" });
 
       if (maxBatchError) {
-        if (isMissingBatchColumnError(maxBatchError)) {
-          throw new Error(
-            "Upload blocked: prospects.batch_number is missing. Run backend/add_batch_columns.sql first."
-          );
-        }
-        throw maxBatchError;
+        throw new Error(`Failed to determine latest batch: ${maxBatchError.message}`);
       }
 
-      const nextBatch = (maxBatchData && maxBatchData.length > 0 ? maxBatchData[0].batch_number : 0) + 1;
+      const nextBatch = (maxBatch || 0) + 1;
 
       const chunkSize = 100;
 

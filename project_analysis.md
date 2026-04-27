@@ -25,6 +25,7 @@ The application is primarily refactored toward a high-performance "Zero-Row" arc
     - **Superadmin:** Full access, including User Management.
 - **Sidebar Integration:** The sidebar dynamically filters navigation items based on the user's assigned role.
 - **Current Data-Layer Status (Important):** Core table RLS policies are still broad for authenticated users (`USING (true)` patterns in schema SQL). Current RBAC behavior is strongest at UI/navigation and specific API-route checks (for example, user management endpoints), not full per-role row-level isolation across all datasets.
+- **Sales Performance RPC Scope Hardening:** `get_sales_performance_summary()` no longer accepts client-provided AM scope. Allowed AMs are enforced server-side inside SQL, with normalized matching (`lower(trim(...))`) to avoid casing/whitespace bypasses.
 
 ## 4. Backend Reorganization
 The Go backend has been restructured to resolve "multiple main() entrypoints" conflicts:
@@ -39,15 +40,20 @@ Standardized `go.mod` at the root ensures consistent dependency management.
 - **GP Achievement:** KPI tracking against a 36,000,000,000 IDR target.
 - **Sales Performance:** Server-aggregated AM achievement chart (Invoiced vs. Target).
 - **Global Filters:** Automatically excludes 2025 invoice data from all financial totals to ensure reporting consistency.
+- **Sales Performance Period Filter:** Added period preset filter on AM breakdown (`All Periods`, `Q1-Q4`, `1H`, `2H`) wired to backend date parameters.
+- **Sales Performance Sorting:** AM Breakdown table now sorts by highest `Achievement %` by default.
 
 ### Projects & Prospects
 - **Server-Side Paging:** Handles thousands of rows with minimal memory footprint.
 - **Trigram Search:** Prospects table uses `pg_trgm` indexes on `prospect_name` and `client_name`. Global search also covers additional fields, but those are not all trigram-index accelerated.
 - **Ingestion-Time Classification:** Categories (FCC/CSS) are determined during upload and stored, though the UI can still re-classify on the fly if keywords change.
+- **Prospects Upload Guardrails:** Upload now validates template headers before processing and blocks mismatched templates. It also validates/canonicalizes `AM_NAME` against the allowed AM list to prevent "success upload but empty latest batch view" issues.
 
 ### Backlog (Project Targets)
 - **Status Persistence:** Allows manual tracking of "On Track", "At Risk", or "Delayed" statuses.
 - **Financial Export:** Optimized Excel export that respects all active search/date/category filters.
+- **Table UX Update:** Backlog column order updated so `Project Name` appears immediately after `PID`.
+- **Upload Guardrails:** Backlog upload now validates required template headers and blocks mismatched templates before insert.
 
 ## 6. Schema And Database Changes
 - **`batch_metadata`**: Stores `latest_batch` per table.
@@ -66,6 +72,8 @@ Standardized `go.mod` at the root ensures consistent dependency management.
 - **Lint-Zero Status**: All TypeScript warnings, unused imports, and `any` types have been resolved.
 - **Effect Stabilization**: All `loadData` functions are wrapped in `useCallback` to prevent infinite re-render loops.
 - **Binary Exclusion**: Workbook files (`.xlsx`) are strictly ignored via `.gitignore`.
+- **Shared Parsing Utilities**: Excel parsing helpers (`parseDate`, `parseNumeric`, `parseText`, `formatDate`) are centralized in `frontend/lib/excel-utils.ts` and reused by Backlog/Prospects.
+- **Deployment Safety**: Strict TypeScript production-build issues from Excel upload mapping and classification unions were fixed; `npm run build` now passes.
 
 ## 9. Guidance For Future Agents
 - **Metadata First**: Always check `batch_metadata` or use `get_latest_batch()` before querying data.
@@ -73,8 +81,17 @@ Standardized `go.mod` at the root ensures consistent dependency management.
 - **Constants Location**: Keep static configuration (like AM lists or keyword patterns) **outside** component definitions to avoid re-render loops.
 - **RBAC Matrix**: Any new page must be registered in the `Access Matrix` in `frontend/app/dashboard/layout.tsx`.
 - **Latency Awareness**: Monitor the console logs for "Query latency" to detect performance regressions early.
+- **Upload Validation First**: Validate template headers (and cross-template mismatch) before mapping/insert in all upload handlers.
+- **Prospects AM Integrity**: Ensure uploaded `AM_NAME` values are canonicalized/validated against allowed AMs; otherwise latest-batch filters can hide newly uploaded rows.
+- **Pagination Label Standard**: Use `Rows per page` consistently in all table pagers.
 
-## 10. Recommended Next Architecture (Scalable + Secure)
+## 10. Recent Implementation Notes (Current Verified State)
+- **Sales Performance RPC Signature**: Uses date-range parameters (`p_start_date`, `p_end_date`) and server-side AM allowlist; no client-provided AM scope parameter.
+- **Prospects Visibility Fix**: Upload now blocks empty/invalid AM names and normalizes valid names to canonical values before insert.
+- **Template Enforcement**: Projects, Prospects, and Backlog uploads now reject empty files, missing required columns, and obvious wrong-template uploads.
+- **UI Consistency Updates**: Pagination wording standardized to `Rows per page`; Backlog table column order adjusted for faster scanning.
+
+## 11. Recommended Next Architecture (Scalable + Secure)
 This section is a target recommendation, not a claim of current state.
 
 - **Enforce RBAC at Data Layer**: Implement role-aware RLS policies on `projects`, `project_targets`, and `prospects` using role mappings from `profiles` (or equivalent source of truth), so direct client queries cannot bypass authorization.

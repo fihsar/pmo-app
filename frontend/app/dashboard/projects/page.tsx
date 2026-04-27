@@ -311,24 +311,33 @@ export default function ProjectsPage() {
 
       const json = XLSX.utils.sheet_to_json(worksheet, { defval: null }) as Record<string, unknown>[];
 
-      if (json.length > 0) {
-        const headers = Object.keys(json[0]);
-        const requiredProjectHeaders = ["PERCENTAGE_PROGRESS", "PQI_TIME", "PQI_COST"];
-        const missingProjectHeaders = requiredProjectHeaders.filter((h) => !headers.includes(h));
+      if (json.length === 0) {
+        throw new Error("Invalid Projects template: file is empty or has no data rows.");
+      }
 
-        if (missingProjectHeaders.length > 0) {
-          const looksLikeProjectTargetTemplate = ["TARGET_DATE", "GP_ACC", "INVOICE_DATE"].every((h) => headers.includes(h));
+      const headers = Object.keys(json[0]).map((h) => h.trim().toUpperCase());
+      const requiredProjectHeaders = ["PERCENTAGE_PROGRESS", "PQI_TIME", "PQI_COST"];
+      const missingProjectHeaders = requiredProjectHeaders.filter((h) => !headers.includes(h));
 
-          if (looksLikeProjectTargetTemplate) {
-            throw new Error(
-              "Wrong template: this looks like Project_Target*.xlsx (Backlog data). Upload this file in Backlog page, not Projects page."
-            );
-          }
+      if (missingProjectHeaders.length > 0) {
+        const looksLikeProjectTargetTemplate = ["TARGET_DATE", "GP_ACC", "INVOICE_DATE"].every((h) => headers.includes(h));
+        const looksLikeProspectsTemplate = ["AM_NAME", "PROSPECT_NAME", "CLIENT_NAME", "STATUS"].every((h) => headers.includes(h));
 
+        if (looksLikeProjectTargetTemplate) {
           throw new Error(
-            `Invalid Projects template. Missing required columns: ${missingProjectHeaders.join(", ")}`
+            "Wrong template: this looks like Project_Target*.xlsx (Backlog data). Upload this file in Backlog page, not Projects page."
           );
         }
+
+        if (looksLikeProspectsTemplate) {
+          throw new Error(
+            "Wrong template: this looks like Prospects data. Upload this file on the Prospects page."
+          );
+        }
+
+        throw new Error(
+          `Invalid Projects template. Missing required columns: ${missingProjectHeaders.join(", ")}`
+        );
       }
 
       const newProjects: Project[] = json.map((row) => {
