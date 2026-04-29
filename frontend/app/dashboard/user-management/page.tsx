@@ -24,15 +24,9 @@ import {
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { useAuthSession } from "@/components/auth-session-provider";
 import { ShieldAlert } from "lucide-react";
+import type { Tables } from "@/lib/database.types";
 
-type ProfileRow = {
-  id: string;
-  user_id?: string | null;
-  full_name: string | null;
-  email: string;
-  role: string | null;
-  status: string | null;
-};
+type ProfileRow = Tables<"profiles">;
 
 export default function UserManagementPage() {
   const { role, loading: authLoading } = useAuthSession();
@@ -144,7 +138,7 @@ export default function UserManagementPage() {
   const startEdit = (user: ProfileRow) => {
     setEditingId(user.id);
     setEditName(user.full_name ?? "");
-    setEditEmail(user.email);
+    setEditEmail(user.email ?? "");
     setEditRole(user.role ?? "Member");
     setEditStatus(user.status ?? "Invited");
     setError("");

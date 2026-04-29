@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { isSupabaseConfigured } from "@/lib/supabase";
 import { useAuthSession } from "@/components/auth-session-provider";
-import { LayoutDashboard, Users, ChevronRight, type LucideIcon, LogOut } from "lucide-react";
+import { LayoutDashboard, ChevronRight, type LucideIcon, LogOut, History, Settings2 } from "lucide-react";
 import Image from "next/image";
 
 import {
@@ -30,6 +30,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 type MenuItem = {
   label: string;
@@ -44,7 +45,7 @@ const menuItems: MenuItem[] = [
     label: "Dashboard",
     icon: LayoutDashboard,
     subItems: [
-      { href: "/dashboard", label: "Project Dashboard" }, // All roles
+      { href: "/dashboard", label: "Project Performance" }, // All roles
       { href: "/dashboard/sales-performance", label: "Sales Performance", allowedRoles: ["Superadmin", "Project Manager", "Project Administrator", "Account Manager"] },
       { href: "/dashboard/prospects", label: "List of Prospects", allowedRoles: ["Superadmin", "Project Manager", "Project Administrator", "Account Manager"] },
       { href: "/dashboard/projects", label: "List of Projects", allowedRoles: ["Superadmin", "Project Manager", "Project Administrator", "Account Manager"] },
@@ -52,10 +53,23 @@ const menuItems: MenuItem[] = [
     ],
   },
   {
-    href: "/dashboard/user-management",
-    label: "User Management",
-    icon: Users,
+    label: "Operations",
+    icon: History,
+    allowedRoles: ["Superadmin", "Project Manager", "Project Administrator", "Account Manager"],
+    subItems: [
+      { href: "/dashboard/uploads", label: "Upload History", allowedRoles: ["Superadmin", "Project Manager", "Project Administrator", "Account Manager"] },
+      { href: "/dashboard/trends", label: "Trend Analytics", allowedRoles: ["Superadmin", "Project Manager", "Project Administrator", "Account Manager"] },
+    ],
+  },
+  {
+    label: "Administration",
+    icon: Settings2,
     allowedRoles: ["Superadmin"],
+    subItems: [
+      { href: "/dashboard/user-management", label: "User Management", allowedRoles: ["Superadmin"] },
+      { href: "/dashboard/business-rules", label: "Business Rules", allowedRoles: ["Superadmin"] },
+      { href: "/dashboard/activity", label: "Activity", allowedRoles: ["Superadmin"] },
+    ],
   },
 ];
 
@@ -207,8 +221,11 @@ function DashboardSidebarContent({ children }: { children: React.ReactNode }) {
         </SidebarFooter>
       </Sidebar>
       <SidebarInset>
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 bg-background">
+        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 md:px-8 bg-background">
           <SidebarTrigger className="-ml-1" />
+          <div className="ml-auto flex items-center gap-2">
+            <ThemeToggle />
+          </div>
         </header>
         <div className="flex flex-1 flex-col gap-4 p-4 md:p-8 pt-6">
           {children}

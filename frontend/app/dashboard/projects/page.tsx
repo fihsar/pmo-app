@@ -11,72 +11,15 @@ import {
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import * as XLSX from "xlsx";
+import { authenticatedFetch } from "@/lib/authenticated-fetch";
+import { defaultBusinessRules, type BusinessRules } from "@/lib/business-rules.shared";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { determineCategory } from "@/lib/classification";
+import type { Tables, Database } from "@/lib/database.types";
 
-type Project = {
-  id?: string;
-  project_id: string | null;
-  customer: string | null;
-  project_name: string | null;
-  project_reference: string | null;
-  project_manager: string | null;
-  account_manager: string | null;
-  pcs_status: string | null;
-  project_category: string | null;
-  client_po_date: string | null;
-  contract_date: string | null;
-  first_issued_date: string | null;
-  project_start_date: string | null;
-  project_end_date: string | null;
-  golive_date: string | null;
-  actual_golive_date: string | null;
-  warranty_end_date: string | null;
-  actual_warranty_end_date: string | null;
-  maintenance_end_date: string | null;
-  main_delivery_team: string | null;
-  pqi_time: number | null;
-  pqi_time_r_0: number | null;
-  pqi_cost: number | null;
-  pqi_cost_r_0: number | null;
-  pqi: number | null;
-  pqi_r0: number | null;
-  schedule_health: string | null;
-  financial_health: string | null;
-  total_sales: number | null;
-  gross_profit: number | null;
-  npp: number | null;
-  npp_actual: number | null;
-  budget_by_progress: number | null;
-  total_budget: number | null;
-  budget_usage: number | null;
-  variance_budget_usage: number | null;
-  modified_date: string | null;
-  progress_date: string | null;
-  percentage_progress: number | null;
-  current_stage: string | null;
-  progress_note: string | null;
-  sales_osl: number | null;
-  sales_3sw: number | null;
-  sales_3sv: number | null;
-  sales_3hw: number | null;
-  sales_osv_osl: number | null;
-  sales_osv_nonosl: number | null;
-  sales_need_invoice_as_june_2020: number | null;
-  gp_osl: number | null;
-  gp_3sw: number | null;
-  gp_3sv: number | null;
-  gp_3hw: number | null;
-  gp_osv_osl: number | null;
-  gp_osv_nonosl: number | null;
-  gp_need_invoice_as_june_2020: number | null;
-  batch_number?: number;
-  upload_date?: string;
-  category?: string | null;
-  category_note?: string | null;
-};
+type Project = Tables<"projects">;
 
 // Helpers for robust parsing
 const parseDate = (value: unknown): string | null => {
@@ -177,10 +120,11 @@ export default function ProjectsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [businessRules, setBusinessRules] = useState<BusinessRules>(defaultBusinessRules);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [sortConfig, setSortConfig] = useState<{ key: keyof Project; direction: "asc" | "desc" } | null>(null);
   
   // Pagination State
@@ -194,6 +138,22 @@ export default function ProjectsPage() {
     }, 500);
     return () => clearTimeout(handler);
   }, [searchQuery]);
+
+  useEffect(() => {
+    const loadRules = async () => {
+      try {
+        const response = await fetch("/api/business-rules");
+        const payload = (await response.json()) as { rules?: BusinessRules };
+        if (response.ok && payload.rules) {
+          setBusinessRules(payload.rules);
+        }
+      } catch {
+        // Keep defaults.
+      }
+    };
+
+    void loadRules();
+  }, []);
 
   const escapeSearch = (value: string) => value.trim().replace(/,/g, " ");
 
@@ -239,7 +199,7 @@ export default function ProjectsPage() {
 
       let query = supabase
         .from("projects")
-        .select("id, project_id, customer, project_name, project_manager, pqi_time, pqi_cost, percentage_progress, category, category_note, batch_number, created_at", { count: "exact" })
+        .select("*", { count: "exact" })
         .eq("batch_number", maxBatch);
 
       if (categoryFilter !== "all") {
@@ -340,8 +300,8 @@ export default function ProjectsPage() {
         );
       }
 
-      const newProjects: Project[] = json.map((row) => {
-        const categoryResult = determineCategory(row as Record<string, unknown>);
+      const newProjects: Database["public"]["Tables"]["projects"]["Insert"][] = json.map((row) => {
+        const categoryResult = determineCategory(row as Record<string, unknown>, businessRules);
         return normalizeProject({
           project_id: row["PROJECT_ID"] || null,
           customer: row["CUSTOMER"] || null,
@@ -423,7 +383,7 @@ export default function ProjectsPage() {
           throw maxBatchError;
         }
 
-        const nextBatch = (maxBatchData && maxBatchData.length > 0 ? maxBatchData[0].batch_number : 0) + 1;
+        const nextBatch = (maxBatchData && maxBatchData.length > 0 ? (maxBatchData[0].batch_number ?? 0) : 0) + 1;
 
         // Insert chunks of 1000 to prevent oversized payloads if Excel is huge
         const CHUNK_SIZE = 1000;
@@ -442,11 +402,30 @@ export default function ProjectsPage() {
         }
         setSuccess(`Successfully imported and saved ${newProjects.length} projects in batch ${nextBatch} using ${file.name}!`);
 
+        void authenticatedFetch("/api/audit-log", {
+          method: "POST",
+          body: JSON.stringify({
+            type: "upload",
+            action: "created",
+            targetType: "projects_batch",
+            targetLabel: `Projects batch ${nextBatch}`,
+            metadata: {
+              datasetId: "projects",
+              batchNumber: nextBatch,
+              fileName: file.name,
+              rowCount: newProjects.length,
+              warnings: [],
+            },
+          }),
+        });
+
         await loadProjects();
       } else {
         // Just show them locally if no supabase
-        setProjects((prev) => [...newProjects, ...prev]);
-        setSuccess(`Loaded ${newProjects.length} projects locally from ${file.name}.`);
+        if (!isSupabaseConfigured) {
+          setProjects(newProjects as Project[]);
+          setSuccess(`Loaded from Excel locally using ${file.name} (Supabase not connected).`);
+        }
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to parse Excel file.");
@@ -469,7 +448,7 @@ export default function ProjectsPage() {
         .order("batch_number", { ascending: false })
         .limit(1);
         
-      const maxBatch = maxBatchData && maxBatchData.length > 0 ? maxBatchData[0].batch_number : 0;
+      const maxBatch = maxBatchData && maxBatchData.length > 0 ? (maxBatchData[0].batch_number ?? 0) : 0;
       if (maxBatch === 0) {
         setError("No data found to export.");
         setLoading(false);

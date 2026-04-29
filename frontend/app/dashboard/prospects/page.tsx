@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -12,63 +12,17 @@ import {
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import * as XLSX from "xlsx";
+import { authenticatedFetch } from "@/lib/authenticated-fetch";
+import { defaultBusinessRules, type BusinessRules } from "@/lib/business-rules.shared";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { formatDate, parseDate, parseNumeric, parseText } from "@/lib/excel-utils";
 import { cn } from "@/lib/utils";
 import { determineCategory } from "@/lib/classification";
+import type { Tables, Database } from "@/lib/database.types";
 
-type Prospect = {
-  id?: string;
-  id_top_sales?: number | null;
-  am_name: string | null;
-  company_name: string | null;
-  directorat?: string | null;
-  group_name?: string | null;
-  id_project: string | null;
-  id_prospect_status?: number | null;
-  prospect_name: string | null;
-  client_name: string | null;
-  status: string | null;
-  term_of_payment?: string | null;
-  amount: number | null;
-  gp: number | null;
-  amount_cl?: number | null;
-  gp_cl?: number | null;
-  est_prospect_close_date?: string | null;
-  target_date: string | null;
-  confidence_level?: number | null;
-  osv_non_osl?: number | null;
-  opr_del?: number | null;
-  batch_number?: number;
-  upload_date?: string;
-  category?: string | null;
-  category_note?: string | null;
-};
-
-const isMissingBatchColumnError = (error: unknown): boolean => {
-  const msg = error instanceof Error ? error.message.toLowerCase() : String(error ?? "").toLowerCase();
-  return msg.includes("batch_number") && msg.includes("does not exist");
-};
-
-const allowedAMs = [
-  "Andrew Daniel Gunalan",
-  "Elsa Yolanda Simanjuntak",
-  "Graeta Venato",
-  "Lizty Latifah",
-  "M. Satria Manggala Yudha",
-  "Merlin",
-  "Pandu R Akbar"
-];
+type Prospect = Tables<"prospects">;
 
 const normalizeAMKey = (value: string) => value.trim().toLowerCase();
-
-const allowedAMMap = new Map(allowedAMs.map((am) => [normalizeAMKey(am), am]));
-
-const toCanonicalAM = (value: string | null): string | null => {
-  if (!value) return null;
-  const trimmed = value.trim();
-  return allowedAMMap.get(normalizeAMKey(trimmed)) ?? trimmed;
-};
 
 const cssNameFallbackPatterns = [
   "%Managed Service%",
@@ -86,6 +40,7 @@ export default function ProspectsPage() {
   const [success, setSuccess] = useState("");
   const [totalAmount, setTotalAmount] = useState(0);
   const [totalGP, setTotalGP] = useState(0);
+  const [businessRules, setBusinessRules] = useState<BusinessRules>(defaultBusinessRules);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
@@ -106,6 +61,34 @@ export default function ProspectsPage() {
     }, 500);
     return () => clearTimeout(handler);
   }, [searchQuery]);
+
+  useEffect(() => {
+    const loadRules = async () => {
+      try {
+        const response = await fetch("/api/business-rules");
+        const payload = (await response.json()) as { rules?: BusinessRules };
+        if (response.ok && payload.rules) {
+          setBusinessRules(payload.rules);
+        }
+      } catch {
+        // Keep defaults.
+      }
+    };
+
+    void loadRules();
+  }, []);
+
+  const allowedAMs = businessRules.allowedAccountManagers;
+  const allowedAMMap = useMemo(
+    () => new Map(allowedAMs.map((am) => [normalizeAMKey(am), am])),
+    [allowedAMs]
+  );
+
+  const toCanonicalAM = useCallback((value: string | null): string | null => {
+    if (!value) return null;
+    const trimmed = value.trim();
+    return allowedAMMap.get(normalizeAMKey(trimmed)) ?? trimmed;
+  }, [allowedAMMap]);
 
   const escapeSearch = (value: string) => value.trim().replace(/,/g, " ");
 
@@ -149,7 +132,7 @@ export default function ProspectsPage() {
 
       let query = supabase
         .from("prospects")
-        .select("id, id_project, am_name, company_name, client_name, prospect_name, status, amount, gp, target_date, category, category_note, batch_number, created_at", { count: "exact" })
+        .select("*", { count: "exact" })
         .eq("batch_number", maxBatch)
         .in("am_name", allowedAMs);
 
@@ -235,7 +218,7 @@ export default function ProspectsPage() {
     setLoading(false);
     const endTime = performance.now();
     console.log(`[Prospects] Query latency: ${(endTime - startTime).toFixed(2)}ms`);
-  }, [debouncedSearchQuery, startDate, endDate, categoryFilter, sortConfig, currentPage, pageSize]);
+  }, [allowedAMs, categoryFilter, currentPage, debouncedSearchQuery, endDate, pageSize, sortConfig, startDate]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -349,8 +332,8 @@ export default function ProspectsPage() {
         console.warn(`Uploading with ${unknownAMs.length} unrecognized AM names:`, unknownAMs);
       }
 
-      const newProspects: Prospect[] = json.map((row) => {
-        const categoryResult = determineCategory(row);
+      const newProspects: Database["public"]["Tables"]["prospects"]["Insert"][] = json.map((row) => {
+        const categoryResult = determineCategory(row, businessRules);
         const canonicalAMName = toCanonicalAM(parseText(row["AM_NAME"]));
         return {
         id_top_sales: parseNumeric(row["ID_TOP_SALES"]),
@@ -379,7 +362,7 @@ export default function ProspectsPage() {
       });
 
       if (!isSupabaseConfigured) {
-        setProspects(newProspects);
+        setProspects(newProspects as Prospect[]);
         setSuccess(`Loaded from Excel locally using ${file.name} (Supabase not connected).`);
         setLoading(false);
         return;
@@ -408,6 +391,23 @@ export default function ProspectsPage() {
       }
 
       setSuccess(`Successfully uploaded ${newProspects.length} prospects in batch ${nextBatch} using ${file.name}!`);
+
+      void authenticatedFetch("/api/audit-log", {
+        method: "POST",
+        body: JSON.stringify({
+          type: "upload",
+          action: "created",
+          targetType: "prospects_batch",
+          targetLabel: `Prospects batch ${nextBatch}`,
+          metadata: {
+            datasetId: "prospects",
+            batchNumber: nextBatch,
+            fileName: file.name,
+            rowCount: newProspects.length,
+            warnings: unknownAMs,
+          },
+        }),
+      });
 
       await loadProspects();
     } catch (err: unknown) {

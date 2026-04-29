@@ -1,0 +1,79 @@
+[
+  {
+    "id": "919e9ba8-71b6-4880-a9b6-f69f0ef6720b",
+    "createdAt": "2026-04-29T09:13:01.171Z",
+    "type": "business_rules",
+    "action": "updated",
+    "actorEmail": "fihsarhafiz@gmail.com",
+    "actorRole": "Superadmin",
+    "targetType": "business_rules",
+    "targetLabel": "Business Rules",
+    "metadata": {
+      "allowedAccountManagers": 7,
+      "kpiProjectManagers": 4,
+      "targetGrossProfit": 36000000000
+    }
+  },
+  {
+    "id": "6a59aaca-3f17-4e5e-b343-beea719a16be",
+    "createdAt": "2026-04-29T07:59:59.228Z",
+    "type": "upload",
+    "action": "created",
+    "targetType": "targets_batch",
+    "targetLabel": "Backlog batch 1",
+    "metadata": {
+      "datasetId": "targets",
+      "batchNumber": 1,
+      "fileName": "Project_Target-34.xlsx",
+      "rowCount": 211,
+      "warnings": []
+    },
+    "actorEmail": "fihsarhafiz@gmail.com",
+    "actorRole": "Superadmin"
+  },
+  {
+    "id": "4974ac40-ebe1-4c58-ba36-aa1f98c91c76",
+    "createdAt": "2026-04-29T07:59:48.693Z",
+    "type": "upload",
+    "action": "created",
+    "targetType": "prospects_batch",
+    "targetLabel": "Prospects batch 1",
+    "metadata": {
+      "datasetId": "prospects",
+      "batchNumber": 1,
+      "fileName": "Report_Prospect_CL.xlsx",
+      "rowCount": 438,
+      "warnings": [
+        "Monica Permata Rahayu",
+        "Fransiska Tunardi",
+        "Addison Giovanni",
+        "Sarah Widya Hafsari",
+        "Sandro Andy Putra Hutapea",
+        "Yuliani Arosyanti",
+        "Vebian",
+        "Andi Aliefah Suci",
+        "Mifta Husna Zsazsaning Ayu",
+        "Putra Ansa Gaora"
+      ]
+    },
+    "actorEmail": "fihsarhafiz@gmail.com",
+    "actorRole": "Superadmin"
+  },
+  {
+    "id": "d2cb6616-ea3b-4320-8523-a76693fb4909",
+    "createdAt": "2026-04-29T07:59:34.718Z",
+    "type": "upload",
+    "action": "created",
+    "targetType": "projects_batch",
+    "targetLabel": "Projects batch 1",
+    "metadata": {
+      "datasetId": "projects",
+      "batchNumber": 1,
+      "fileName": "MyProject-31.xlsx",
+      "rowCount": 104,
+      "warnings": []
+    },
+    "actorEmail": "fihsarhafiz@gmail.com",
+    "actorRole": "Superadmin"
+  }
+]

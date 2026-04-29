@@ -119,11 +119,29 @@ The current implementation emphasizes:
 - Clean up lint warnings and type-safety issues
 - Separate one-off Go utilities from the main backend package for easier builds and CI
 
+## Supabase Database Types
+
+The application uses generated TypeScript types from the Supabase project schema to ensure end-to-end type safety. These types are stored in `lib/database.types.ts`.
+
+### Regenerating Types
+
+If you change the database schema (tables, columns, or RPCs), you must regenerate the types:
+
+1. Ensure you have the `SUPABASE_PROJECT_ID` and `SUPABASE_ACCESS_TOKEN` (or be logged in via `npx supabase login`).
+2. Run the generation script:
+   ```bash
+   npm run db:types
+   ```
+
+Note: The script expects `SUPABASE_PROJECT_ID` to be set in your environment.
+
 ## Scripts
 
 ```bash
-npm run dev
-npm run build
-npm run start
-npm run lint
+npm run dev          # Start development server
+npm run build        # Build for production
+npm run start        # Start production server
+npm run lint         # Run ESLint
+npm run type-check   # Run TypeScript compiler check
+npm run db:types     # Generate Supabase types (requires SUPABASE_PROJECT_ID)
 ```

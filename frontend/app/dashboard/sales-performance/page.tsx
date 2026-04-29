@@ -15,19 +15,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import * as XLSX from "xlsx";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
+import type { Database } from "@/lib/database.types";
 
 // --- Constants ---
 const COMPANY_TARGET = 36_000_000_000;
 
 // --- Types ---
-type SalesPerformance = {
-  sales_person: string;
-  am_target: number;
-  backlog: number;
-  prospect_pipeline: number;
-  total_opportunity: number;
-  achievement_percent: number;
-};
+type SalesPerformance = Database["public"]["Functions"]["get_sales_performance_summary"]["Returns"][0];
 
 export default function SalesPerformancePage() {
   const [data, setData] = useState<SalesPerformance[]>([]);

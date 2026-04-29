@@ -11,49 +11,16 @@ import {
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import * as XLSX from "xlsx";
+import { authenticatedFetch } from "@/lib/authenticated-fetch";
+import { defaultBusinessRules, type BusinessRules } from "@/lib/business-rules.shared";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { formatDate, parseDate, parseNumeric, parseText } from "@/lib/excel-utils";
 import { cn } from "@/lib/utils";
 import { Checkbox } from "@/components/ui/checkbox";
 import { determineCategory } from "@/lib/classification";
+import type { Tables, Database } from "@/lib/database.types";
 
-type ProjectTarget = {
-  id?: string;
-  target_id: number | null;
-  company_name: string | null;
-  project_id: string | null;
-  customer: string | null;
-  project_name: string | null;
-  project_manager: string | null;
-  account_manager: string | null;
-  group_am?: string | null;
-  is_po?: string | null;
-  is_contract?: string | null;
-  term_of_payment_sales: string | null;
-  invoice_status: string | null;
-  project_category: string | null;
-  project_tracking: string | null;
-  total: number | null;
-  gp_acc: number | null;
-  net_profit_project?: number | null;
-  npp_actual?: number | null;
-  client_po_date: string | null;
-  invoice_number: string | null;
-  invoice_date: string | null;
-  payment_date: string | null;
-  target_date: string | null;
-  target_invoice_r0: string | null;
-  aging_invoice: number | null;
-  count_target_change: number | null;
-  history_update_target_date?: string | null;
-  last_update: string | null;
-  reason_update?: string | null;
-  batch_number?: number;
-  upload_date?: string;
-  status?: string | null;
-  category?: string | null;
-  category_note?: string | null;
-};
+type ProjectTarget = Tables<"project_targets">;
 
 // Classification logic is now imported from @/lib/classification
 
@@ -65,13 +32,14 @@ export default function ProjectTargetPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [businessRules, setBusinessRules] = useState<BusinessRules>(defaultBusinessRules);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [presetRange, setPresetRange] = useState("custom");
-  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [invoiceDateEmpty, setInvoiceDateEmpty] = useState(false);
   const [sortConfig, setSortConfig] = useState<{ key: keyof ProjectTarget; direction: "asc" | "desc" } | null>({ key: "target_date", direction: "asc" });
   
@@ -86,6 +54,22 @@ export default function ProjectTargetPage() {
     }, 500);
     return () => clearTimeout(handler);
   }, [searchQuery]);
+
+  useEffect(() => {
+    const loadRules = async () => {
+      try {
+        const response = await fetch("/api/business-rules");
+        const payload = (await response.json()) as { rules?: BusinessRules };
+        if (response.ok && payload.rules) {
+          setBusinessRules(payload.rules);
+        }
+      } catch {
+        // Keep defaults.
+      }
+    };
+
+    void loadRules();
+  }, []);
 
   const escapeSearch = (value: string) => value.trim().replace(/,/g, " ");
 
@@ -130,7 +114,7 @@ export default function ProjectTargetPage() {
 
       let query = supabase
         .from("project_targets")
-        .select("id, target_id, company_name, project_id, customer, project_name, project_manager, account_manager, term_of_payment_sales, invoice_status, project_category, project_tracking, total, gp_acc, client_po_date, invoice_number, invoice_date, payment_date, target_date, target_invoice_r0, aging_invoice, count_target_change, last_update, status, category, category_note, batch_number, created_at", { count: "exact" })
+        .select("*", { count: "exact" })
         .eq("batch_number", maxBatch)
         .or("invoice_date.is.null,invoice_date.lt.2025-01-01,invoice_date.gte.2026-01-01");
 
@@ -324,7 +308,9 @@ export default function ProjectTargetPage() {
         );
       }
       
-      const newTargets: ProjectTarget[] = json.map((row) => ({
+      const newTargets: Database["public"]["Tables"]["project_targets"]["Insert"][] = json.map((row) => {
+        const categoryResult = determineCategory(row, businessRules);
+        return ({
         target_id: parseNumeric(row["ID"]),
         company_name: parseText(row["COMPANY_NAME"]),
         project_id: parseText(row["PROJECT_ID"]),
@@ -354,12 +340,13 @@ export default function ProjectTargetPage() {
         history_update_target_date: parseText(row["HISTORY_UPDATE_TARGET_DATE"]),
         last_update: parseDate(row["LAST_UPDATE"]),
         reason_update: parseText(row["REASON_UPDATE"]),
-        category: determineCategory(row).category,
-        category_note: determineCategory(row).category_note,
-      }));
+        category: categoryResult.category,
+        category_note: categoryResult.category_note,
+      });
+      });
 
       if (!isSupabaseConfigured) {
-        setTargets(newTargets);
+        setTargets(newTargets as ProjectTarget[]);
         setSuccess(`Loaded from Excel locally using ${file.name} (Supabase not connected).`);
         setLoading(false);
         return;
@@ -388,6 +375,24 @@ export default function ProjectTargetPage() {
       }
 
       setSuccess(`Successfully uploaded ${newTargets.length} project targets using ${file.name}!`);
+
+      void authenticatedFetch("/api/audit-log", {
+        method: "POST",
+        body: JSON.stringify({
+          type: "upload",
+          action: "created",
+          targetType: "targets_batch",
+          targetLabel: `Backlog batch ${nextBatch}`,
+          metadata: {
+            datasetId: "targets",
+            batchNumber: nextBatch,
+            fileName: file.name,
+            rowCount: newTargets.length,
+            warnings: [],
+          },
+        }),
+      });
+
       await loadTargets();
     } catch (err: unknown) {
       console.error(err);
@@ -413,7 +418,7 @@ export default function ProjectTargetPage() {
         .order("batch_number", { ascending: false })
         .limit(1);
         
-      const maxBatch = maxBatchData && maxBatchData.length > 0 ? maxBatchData[0].batch_number : 0;
+      const maxBatch = maxBatchData && maxBatchData.length > 0 ? (maxBatchData[0].batch_number ?? 0) : 0;
       
       if (maxBatch === 0) {
         setError("No data found to export.");

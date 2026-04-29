@@ -15,21 +15,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { useAuthSession } from "@/components/auth-session-provider";
+import { ThemeToggle } from "@/components/theme-toggle";
 import {
   LayoutDashboard,
   LogIn,
   UserPlus,
   AlertCircle,
   CheckCircle2,
-  Moon,
 } from "lucide-react";
-
-const getInitialTheme = (): "light" | "dark" => {
-  if (typeof window === "undefined") return "light";
-  const storedTheme = window.localStorage.getItem("theme");
-  const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-  return storedTheme === "dark" || (!storedTheme && prefersDark) ? "dark" : "light";
-};
 
 export default function App() {
   const router = useRouter();
@@ -38,7 +31,6 @@ export default function App() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [isRegister, setIsRegister] = useState(false);
-  const [theme, setTheme] = useState<"light" | "dark">(getInitialTheme);
   const [errorMsg, setErrorMsg] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
   const configError = !isSupabaseConfigured
@@ -46,21 +38,10 @@ export default function App() {
     : "";
 
   useEffect(() => {
-    document.documentElement.classList.toggle("dark", theme === "dark");
-  }, [theme]);
-
-  useEffect(() => {
     if (session) {
       router.replace("/dashboard");
     }
   }, [router, session]);
-
-  const toggleTheme = () => {
-    const nextTheme = theme === "dark" ? "light" : "dark";
-    setTheme(nextTheme);
-    localStorage.setItem("theme", nextTheme);
-    document.documentElement.classList.toggle("dark", nextTheme === "dark");
-  };
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -114,17 +95,7 @@ export default function App() {
 
   return (
     <div className="relative flex min-h-screen items-center justify-center bg-background p-4 font-sans text-foreground selection:bg-primary/20">
-      <Button
-        variant="outline"
-        size="sm"
-        type="button"
-        onClick={toggleTheme}
-        className="absolute right-4 top-4"
-      >
-        <span className="flex items-center gap-2">
-          <Moon className="size-4" /> Toggle theme
-        </span>
-      </Button>
+      <ThemeToggle className="absolute right-4 top-4" />
       <div className="w-full max-w-sm space-y-8">
         
         {/* Modern Minimalist Branding */}

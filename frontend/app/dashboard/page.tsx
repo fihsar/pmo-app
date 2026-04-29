@@ -11,25 +11,24 @@ import {
   PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
 } from "recharts";
+import { defaultBusinessRules, type BusinessRules } from "@/lib/business-rules.shared";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
+import type { Database, Tables } from "@/lib/database.types";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-type Project = {
-  pqi_time: number | null;
-  pqi_cost: number | null;
-  percentage_progress: number | null;
-  schedule_health: string | null;
-  financial_health: string | null;
-  project_manager: string | null;
-  project_category: string | null;
-  total_budget: number | null;
-  budget_usage: number | null;
-};
+// Use generated Tables<"projects"> for base project shape but we only need a subset for the dashboard
+type Project = Pick<Tables<"projects">, 
+  "pqi_time" | "pqi_cost" | "percentage_progress" | "schedule_health" | 
+  "financial_health" | "project_manager" | "project_category" | 
+  "total_budget" | "budget_usage"
+>;
 
-
-type DashboardStatItem = { name: string; value: number };
-type DashboardBudgetItem = { name: string; budget: number; usage: number };
+// These helper types are also available in database.types if needed, 
+// but often they are nested. Let's use the ones from there if possible.
+type DashboardStatItem = Database["public"]["Functions"]["get_dashboard_summary"]["Returns"][0]["pqi_time_data"] extends (infer U)[] | null ? U : never;
+type DashboardBudgetItem = Database["public"]["Functions"]["get_dashboard_summary"]["Returns"][0]["budget_data"] extends (infer U)[] | null ? U : never;
+type DashboardSummaryRow = Database["public"]["Functions"]["get_dashboard_summary"]["Returns"][0];
 
 type DashboardStats = {
   total: number;
@@ -44,25 +43,6 @@ type DashboardStats = {
   budgetData: DashboardBudgetItem[];
   totalGrossProfit: number;
 };
-
-const TARGET_GROSS_PROFIT = 36_000_000_000;
-
-type DashboardSummaryRow = {
-  total: number | string | null;
-  avg_progress: number | string | null;
-  avg_pqi_time: number | string | null;
-  avg_pqi_cost: number | string | null;
-  pqi_time_data: DashboardStatItem[] | null;
-  pqi_cost_data: DashboardStatItem[] | null;
-  sched_data: DashboardStatItem[] | null;
-  fin_data: DashboardStatItem[] | null;
-  progress_data: Array<{ name: string; count: number }> | null;
-  pm_data: DashboardStatItem[] | null;
-  cat_data: DashboardStatItem[] | null;
-  budget_data: DashboardBudgetItem[] | null;
-  total_gross_profit: number | string | null;
-};
-
 
 // ── Color helpers ──────────────────────────────────────────────────────────────
 const PQI_COLORS = {
@@ -168,7 +148,24 @@ const mapDashboardSummary = (row: DashboardSummaryRow): DashboardStats => {
 export default function DashboardPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [summaryStats, setSummaryStats] = useState<DashboardStats | null>(null);
+  const [businessRules, setBusinessRules] = useState<BusinessRules>(defaultBusinessRules);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const loadRules = async () => {
+      try {
+        const response = await fetch("/api/business-rules");
+        const payload = (await response.json()) as { rules?: BusinessRules };
+        if (response.ok && payload.rules) {
+          setBusinessRules(payload.rules);
+        }
+      } catch {
+        // Keep defaults if the rules endpoint is unavailable.
+      }
+    };
+
+    void loadRules();
+  }, []);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -227,17 +224,10 @@ export default function DashboardPage() {
     };
 
     // KPI averages: exclude maintenance projects AND only include specific PMs
-    const KPI_PMS = [
-      "yohanes ivan enda",
-      "khoirul tasya",
-      "mahendra gati",
-      "tasya tamaraputri",
-    ];
-
     const kpiProjects = projects.filter(
       p =>
         p.project_category?.toLowerCase() !== "maintenance" &&
-        KPI_PMS.includes(p.project_manager?.toLowerCase() ?? "")
+        businessRules.kpiProjectManagers.includes(p.project_manager?.toLowerCase() ?? "")
     );
 
     const avgProgress = avg(kpiProjects.map(p => p.percentage_progress));
@@ -311,7 +301,7 @@ export default function DashboardPage() {
       pqiTimeData, pqiCostData,
       progressData, pmData, catData, budgetData, totalGrossProfit,
     };
-  }, [projects]);
+  }, [businessRules.kpiProjectManagers, projects]);
 
   const stats = summaryStats ?? fallbackStats;
 
@@ -322,7 +312,7 @@ export default function DashboardPage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="rounded-2xl border bg-card p-6 shadow-sm">
-        <h1 className="text-2xl font-semibold tracking-tight">Project Dashboard</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Project Performance</h1>
         <p className="text-sm text-muted-foreground">
           Real-time overview of project health, performance, and portfolio metrics.
         </p>
@@ -349,7 +339,7 @@ export default function DashboardPage() {
       {(loading || stats) && (
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <KpiCard label="Total Projects"    value={loading ? "–" : stats!.total}                             icon={FolderKanban} color="bg-indigo-500"   loading={loading} />
-          <KpiCard label="GP Achievement" value={loading ? "–" : `${((stats!.totalGrossProfit / TARGET_GROSS_PROFIT) * 100).toFixed(1)}%`} icon={Activity} color="bg-emerald-500" loading={loading} sub="total gross profit / target gross profit" />
+          <KpiCard label="GP Achievement" value={loading ? "–" : `${((stats!.totalGrossProfit / businessRules.targetGrossProfit) * 100).toFixed(1)}%`} icon={Activity} color="bg-emerald-500" loading={loading} sub="total gross profit / target gross profit" />
           <KpiCard label="Avg PQI Time"      value={loading ? "–" : `${stats!.avgPqiTime.toFixed(1)}%`}       icon={Clock}        color="bg-amber-500"    loading={loading} sub="schedule performance" />
           <KpiCard label="Avg PQI Cost"      value={loading ? "–" : `${stats!.avgPqiCost.toFixed(1)}%`}       icon={DollarSign}   color="bg-rose-500"     loading={loading} sub="cost performance" />
         </section>

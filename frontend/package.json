@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "type-check": "tsc --noEmit",
+    "db:types": "npx -y supabase gen types typescript --project-id ${SUPABASE_PROJECT_ID:?SUPABASE_PROJECT_ID not set} > lib/database.types.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.103.3",

@@ -10,12 +10,13 @@ import {
 } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
+import type { Tables } from "@/lib/database.types";
 
 type AuthSessionContextValue = {
   session: Session | null;
   user: User | null;
   loading: boolean;
-  role: string | null;
+  role: Tables<"profiles">["role"];
   signOut: () => Promise<void>;
   refreshSession: () => Promise<void>;
 };
@@ -24,7 +25,7 @@ const AuthSessionContext = createContext<AuthSessionContextValue | undefined>(un
 
 export function AuthSessionProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
-  const [role, setRole] = useState<string | null>(null);
+  const [role, setRole] = useState<Tables<"profiles">["role"]>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {

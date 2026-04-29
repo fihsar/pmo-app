@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
-import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
+import { appendAuditEvent } from "@/lib/audit-log.server";
+import { getSupabaseAdmin, isSupabaseAdminConfigured } from "@/lib/supabase-admin";
 import { verifyAdmin } from "@/lib/supabase-server";
+import type { Database } from "@/lib/database.types";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -18,6 +20,8 @@ export async function PATCH(request: Request, context: RouteContext) {
       { status: 500 }
     );
   }
+
+  const supabaseAdmin = getSupabaseAdmin();
 
   const { id } = await context.params;
   const body = (await request.json()) as {
@@ -48,19 +52,36 @@ export async function PATCH(request: Request, context: RouteContext) {
     }
   }
 
+  const profileUpdate: Database["public"]["Tables"]["profiles"]["Update"] = {
+    full_name: fullName,
+    email,
+    role,
+    status,
+  };
+
   const { error: profileUpdateError } = await supabaseAdmin
     .from("profiles")
-    .update({
-      full_name: fullName,
-      email,
-      role,
-      status,
-    })
+    .update(profileUpdate)
     .eq("id", id);
 
   if (profileUpdateError) {
     return NextResponse.json({ error: profileUpdateError.message }, { status: 400 });
   }
+
+  await appendAuditEvent({
+    type: "user_management",
+    action: "updated",
+    actorEmail: auth.user.email ?? null,
+    actorRole: auth.profile.role ?? null,
+    targetType: "user",
+    targetLabel: email,
+    metadata: {
+      id,
+      fullName,
+      role,
+      status,
+    },
+  });
 
   return NextResponse.json({ message: "User updated successfully." });
 }
@@ -77,6 +98,8 @@ export async function DELETE(_request: Request, context: RouteContext) {
       { status: 500 }
     );
   }
+
+  const supabaseAdmin = getSupabaseAdmin();
 
   const { id } = await context.params;
   if (!id) {
@@ -104,6 +127,19 @@ export async function DELETE(_request: Request, context: RouteContext) {
   if (deleteError) {
     return NextResponse.json({ error: deleteError.message }, { status: 400 });
   }
+
+  await appendAuditEvent({
+    type: "user_management",
+    action: "deleted",
+    actorEmail: auth.user.email ?? null,
+    actorRole: auth.profile.role ?? null,
+    targetType: "user",
+    targetLabel: profile.user_id ?? id,
+    metadata: {
+      id,
+      userId: profile.user_id,
+    },
+  });
 
   return NextResponse.json({ message: "User removed successfully." });
 }
