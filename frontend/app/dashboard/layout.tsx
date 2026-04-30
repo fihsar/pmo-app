@@ -68,6 +68,7 @@ const menuItems: MenuItem[] = [
     subItems: [
       { href: "/dashboard/user-management", label: "User Management", allowedRoles: ["Superadmin"] },
       { href: "/dashboard/business-rules", label: "Business Rules", allowedRoles: ["Superadmin"] },
+      { href: "/dashboard/sales-targets", label: "Sales Targets", allowedRoles: ["Superadmin"] },
       { href: "/dashboard/activity", label: "Activity", allowedRoles: ["Superadmin"] },
     ],
   },

@@ -1,13 +1,47 @@
--- Sales Performance RPC for unified sales tracking.
--- Combines data from project_targets (Backlog) and prospects to show per-salesperson achievement.
--- Business Rules:
--- 1. AM Target = individual annual_target from am_master (editable by Superadmin)
--- 2. Backlog = Total GP (sum of all gp_acc from project_targets)
--- 3. Achievement % = Backlog / AM Target * 100
--- 4. Total Opportunity = Backlog + Prospect Pipeline
+-- Migration 008: Editable Sales Targets (Per-AM + Category)
+--
+-- Problem: AM quotas are hardcoded (36B / count(AMs)) in the RPC. Adding or changing
+-- an AM's individual target requires a SQL deploy.
+--
+-- Solution: Store annual targets on am_master, and create a category_targets table
+-- for company-wide category-level budgets. Update get_sales_performance_summary to
+-- use per-AM targets instead of a computed formula.
 
-DROP FUNCTION IF EXISTS public.get_sales_performance_summary(text[]);
-DROP FUNCTION IF EXISTS public.get_sales_performance_summary(text[], text, text);
+-- 1a. Add annual_target column to am_master
+ALTER TABLE public.am_master
+    ADD COLUMN IF NOT EXISTS annual_target NUMERIC NOT NULL DEFAULT 0;
+
+-- Seed existing 7 AMs with the current equal-split value so the dashboard doesn't go blank
+UPDATE public.am_master SET annual_target = ROUND(36000000000.0 / 7.0) WHERE annual_target = 0;
+
+-- 1b. Create category_targets table for company-wide category budgets
+CREATE TABLE IF NOT EXISTS public.category_targets (
+    id         SERIAL      PRIMARY KEY,
+    category   TEXT        NOT NULL UNIQUE,  -- 'CSS' | 'FCC' | 'UNCLASSIFIED'
+    target     NUMERIC     NOT NULL DEFAULT 0,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc', now())
+);
+
+ALTER TABLE public.category_targets ENABLE ROW LEVEL SECURITY;
+
+-- Everyone can read category targets (used by RPCs and dashboards).
+CREATE POLICY "category_targets_select" ON public.category_targets
+    FOR SELECT TO authenticated USING (true);
+
+-- Only Superadmin can manage.
+CREATE POLICY "category_targets_write" ON public.category_targets
+    FOR ALL TO authenticated
+    USING (public.get_my_role() = 'Superadmin')
+    WITH CHECK (public.get_my_role() = 'Superadmin');
+
+-- Seed the three fixed categories.
+INSERT INTO public.category_targets (category, target) VALUES
+    ('CSS', 0),
+    ('FCC', 0),
+    ('UNCLASSIFIED', 0)
+ON CONFLICT (category) DO NOTHING;
+
+-- 1c. Update get_sales_performance_summary to use per-AM annual_target
 DROP FUNCTION IF EXISTS public.get_sales_performance_summary(text, text);
 
 CREATE OR REPLACE FUNCTION public.get_sales_performance_summary(

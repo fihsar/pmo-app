@@ -1,6 +1,6 @@
 import type { Json } from "@/lib/database.types";
 
-export type AuditEventType = "upload" | "user_management" | "business_rules";
+export type AuditEventType = "upload" | "user_management" | "business_rules" | "sales_targets";
 
 export type AuditEvent = {
   id: string;

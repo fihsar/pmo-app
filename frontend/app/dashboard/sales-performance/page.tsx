@@ -15,16 +15,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import * as XLSX from "xlsx";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
+import { authenticatedFetchJson } from "@/lib/authenticated-fetch";
 import type { Database } from "@/lib/database.types";
-
-// --- Constants ---
-const COMPANY_TARGET = 36_000_000_000;
+import type { SalesTargets } from "@/lib/sales-targets.shared";
 
 // --- Types ---
 type SalesPerformance = Database["public"]["Functions"]["get_sales_performance_summary"]["Returns"][0];
 
 export default function SalesPerformancePage() {
   const [data, setData] = useState<SalesPerformance[]>([]);
+  const [companyTarget, setCompanyTarget] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -48,16 +48,27 @@ export default function SalesPerformancePage() {
     setError("");
 
     try {
-      const { data: rpcData, error: rpcError } = await supabase.rpc("get_sales_performance_summary", {
-        p_start_date: startDate || null,
-        p_end_date: endDate || null,
-      });
+      const [rpcResult, targetsResult] = await Promise.all([
+        supabase.rpc("get_sales_performance_summary", {
+          p_start_date: startDate || null,
+          p_end_date: endDate || null,
+        }),
+        authenticatedFetchJson<SalesTargets>("/api/sales-targets").catch(() => null),
+      ]);
+
+      const { data: rpcData, error: rpcError } = rpcResult;
       if (rpcError) throw rpcError;
 
       if (rpcData) {
         // Sort by total opportunity descending by default
         const sorted = (rpcData as SalesPerformance[]).sort((a, b) => b.total_opportunity - a.total_opportunity);
         setData(sorted);
+      }
+
+      // Compute company target as sum of all AM annual targets
+      if (targetsResult) {
+        const total = targetsResult.amTargets.reduce((sum, am) => sum + am.annualTarget, 0);
+        setCompanyTarget(total);
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -170,7 +181,7 @@ export default function SalesPerformancePage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Sales Performance</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Unified view of AM achievement (Total GP) against the 36B company target.
+            Unified view of AM achievement (Total GP) against individual targets.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -188,20 +199,20 @@ export default function SalesPerformancePage() {
 
       {/* KPI Cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <KpiCard 
-          label="Company Target" 
-          value={`Rp ${(COMPANY_TARGET / 1_000_000_000).toFixed(1)}B`} 
-          icon={Building2} 
-          color="bg-slate-900" 
-          loading={loading} 
-        />
-        <KpiCard 
-          label="Total Backlog" 
-          value={`Rp ${(totals.backlog / 1_000_000_000).toFixed(1)}B`} 
-          icon={Target} 
-          color="bg-indigo-600" 
+        <KpiCard
+          label="Company Target"
+          value={companyTarget !== null ? `Rp ${(companyTarget / 1_000_000_000).toFixed(1)}B` : "—"}
+          icon={Building2}
+          color="bg-slate-900"
           loading={loading}
-          sub={`${((totals.backlog / COMPANY_TARGET) * 100).toFixed(1)}% of company goal`}
+        />
+        <KpiCard
+          label="Total Backlog"
+          value={`Rp ${(totals.backlog / 1_000_000_000).toFixed(1)}B`}
+          icon={Target}
+          color="bg-indigo-600"
+          loading={loading}
+          sub={companyTarget !== null && companyTarget > 0 ? `${((totals.backlog / companyTarget) * 100).toFixed(1)}% of company goal` : undefined}
         />
         <KpiCard 
           label="Prospect Pipeline" 
