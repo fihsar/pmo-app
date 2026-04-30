@@ -10,13 +10,15 @@ import {
   ChevronRight, ChevronsLeft, ChevronsRight, Upload, Download, Inbox 
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import * as XLSX from "xlsx";
+// xlsx is ~400 KB — loaded only when the user uploads or exports
 import { authenticatedFetch } from "@/lib/authenticated-fetch";
 import { defaultBusinessRules, type BusinessRules } from "@/lib/business-rules.shared";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { determineCategory } from "@/lib/classification";
+import { projectRowSchema, validateRows } from "@/lib/excel-row-schemas";
+import { parseXlsxInWorker } from "@/lib/use-xlsx-parser";
 import type { Tables, Database } from "@/lib/database.types";
 
 type Project = Tables<"projects">;
@@ -263,13 +265,8 @@ export default function ProjectsPage() {
     setSuccess("");
 
     try {
-      const data = await file.arrayBuffer();
-      // cellDates: true converts Excel dates into JS Dates automatically
-      const workbook = XLSX.read(data, { type: "array" });
-      const sheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[sheetName];
-
-      const json = XLSX.utils.sheet_to_json(worksheet, { defval: null }) as Record<string, unknown>[];
+      const buffer = await file.arrayBuffer();
+      const json = await parseXlsxInWorker(buffer);
 
       if (json.length === 0) {
         throw new Error("Invalid Projects template: file is empty or has no data rows.");
@@ -298,6 +295,17 @@ export default function ProjectsPage() {
         throw new Error(
           `Invalid Projects template. Missing required columns: ${missingProjectHeaders.join(", ")}`
         );
+      }
+
+      // Per-row Zod validation — catches silently-missing columns and type mismatches
+      const normalizedJson = json.map((r) =>
+        Object.fromEntries(Object.entries(r).map(([k, v]) => [k.trim().toUpperCase(), v]))
+      );
+      const { invalidCount, firstErrors } = validateRows(projectRowSchema, normalizedJson);
+      if (invalidCount > 0) {
+        console.warn(`[Projects] ${invalidCount} row(s) failed validation:`, firstErrors);
+        // Surface as a non-blocking warning rather than an error — partial data is still useful
+        setSuccess(`Warning: ${invalidCount} row(s) had unexpected values and were coerced to null. First issues: ${firstErrors.slice(0, 2).join("; ")}`);
       }
 
       const newProjects: Database["public"]["Tables"]["projects"]["Insert"][] = json.map((row) => {
@@ -493,6 +501,7 @@ export default function ProjectsPage() {
         'CATEGORY_NOTE': p.category_note
       }));
 
+      const XLSX = await import("xlsx");
       const ws = XLSX.utils.json_to_sheet(exportData);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Projects");

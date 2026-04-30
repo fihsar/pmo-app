@@ -14,6 +14,7 @@ RETURNS TABLE (
 ) 
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
 BEGIN
   RETURN QUERY
@@ -34,9 +35,9 @@ BEGIN
       category ILIKE '%' || p_search_query || '%' OR
       status ILIKE '%' || p_search_query || '%'
     )
-    -- Date range filters
-    AND (p_start_date IS NULL OR p_start_date = '' OR target_date >= p_start_date::date)
-    AND (p_end_date IS NULL OR p_end_date = '' OR target_date <= p_end_date::date)
+    -- Date range filters — cast via Jakarta timezone so boundary days don't drift
+    AND (p_start_date IS NULL OR p_start_date = '' OR target_date >= (p_start_date::timestamptz AT TIME ZONE 'Asia/Jakarta')::date)
+    AND (p_end_date   IS NULL OR p_end_date   = '' OR target_date <= (p_end_date::timestamptz   AT TIME ZONE 'Asia/Jakarta')::date)
     -- Category filter (with full CSS fallback logic)
     AND (
       p_category_filter = 'all' OR

@@ -1,31 +1,31 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useMemo } from "react";
+import dynamic from "next/dynamic";
+import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import {
-  FolderKanban, TrendingUp, Clock, DollarSign, UploadCloud,
-  Activity
+  FolderKanban, Clock, DollarSign, UploadCloud, Activity
 } from "lucide-react";
-import {
-  PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
-  BarChart, Bar, XAxis, YAxis, CartesianGrid,
-} from "recharts";
+
+// Recharts (~200 KB) loaded only after KPI cards render
+const DashboardCharts = dynamic(
+  () => import("@/components/dashboard-charts").then((m) => m.DashboardCharts),
+  { ssr: false, loading: () => <div className="space-y-4"><div className="h-56 animate-pulse rounded-2xl bg-muted" /><div className="h-56 animate-pulse rounded-2xl bg-muted" /></div> }
+);
 import { defaultBusinessRules, type BusinessRules } from "@/lib/business-rules.shared";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { Database, Tables } from "@/lib/database.types";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-// Use generated Tables<"projects"> for base project shape but we only need a subset for the dashboard
-type Project = Pick<Tables<"projects">, 
-  "pqi_time" | "pqi_cost" | "percentage_progress" | "schedule_health" | 
-  "financial_health" | "project_manager" | "project_category" | 
+type Project = Pick<Tables<"projects">,
+  "pqi_time" | "pqi_cost" | "percentage_progress" | "schedule_health" |
+  "financial_health" | "project_manager" | "project_category" |
   "total_budget" | "budget_usage"
 >;
 
-// These helper types are also available in database.types if needed, 
-// but often they are nested. Let's use the ones from there if possible.
 type DashboardStatItem = Database["public"]["Functions"]["get_dashboard_summary"]["Returns"][0]["pqi_time_data"] extends (infer U)[] | null ? U : never;
 type DashboardBudgetItem = Database["public"]["Functions"]["get_dashboard_summary"]["Returns"][0]["budget_data"] extends (infer U)[] | null ? U : never;
 type DashboardSummaryRow = Database["public"]["Functions"]["get_dashboard_summary"]["Returns"][0];
@@ -44,14 +44,6 @@ type DashboardStats = {
   totalGrossProfit: number;
 };
 
-// ── Color helpers ──────────────────────────────────────────────────────────────
-const PQI_COLORS = {
-  Black:  "#6b7280",
-  Red:    "#ef4444",
-  Yellow: "#f59e0b",
-  Green:  "#16a34a",
-};
-
 const getPqiBucket = (val: number | null) => {
   if (val === null) return "No Data";
   if (val < 1)  return "Black";
@@ -59,11 +51,6 @@ const getPqiBucket = (val: number | null) => {
   if (val < 91) return "Yellow";
   return "Green";
 };
-
-const CHART_COLORS = [
-  "#6366f1","#22c55e","#f59e0b","#ef4444","#3b82f6",
-  "#a855f7","#14b8a6","#f97316","#ec4899","#8b5cf6",
-];
 
 // ── Skeleton ───────────────────────────────────────────────────────────────────
 function Skeleton({ className }: { className?: string }) {
@@ -97,7 +84,7 @@ function KpiCard({
   );
 }
 
-// ── Custom Tooltip ─────────────────────────────────────────────────────────────
+// ── Custom Tooltip (kept for KpiCard — charts use their own copy in dashboard-charts) ──
 interface ChartTooltipProps {
   active?: boolean;
   payload?: { name: string; value: number | string; color?: string; fill?: string }[];
@@ -144,87 +131,80 @@ const mapDashboardSummary = (row: DashboardSummaryRow): DashboardStats => {
   };
 };
 
+// ── Data fetchers ──────────────────────────────────────────────────────────────
+async function fetchBusinessRules(): Promise<BusinessRules> {
+  const res = await fetch("/api/business-rules");
+  if (!res.ok) return defaultBusinessRules;
+  const payload = (await res.json()) as { rules?: BusinessRules };
+  return payload.rules ?? defaultBusinessRules;
+}
+
+async function fetchDashboardSummary(): Promise<DashboardSummaryRow | null> {
+  if (!isSupabaseConfigured) return null;
+
+  const { data, error } = await supabase.rpc("get_dashboard_summary");
+  if (!error && data) {
+    const row = Array.isArray(data) ? data[0] : data;
+    return (row as DashboardSummaryRow) ?? null;
+  }
+  return null;
+}
+
+async function fetchFallbackProjects(): Promise<Project[]> {
+  if (!isSupabaseConfigured) return [];
+
+  const { data: batchData } = await supabase
+    .from("projects")
+    .select("batch_number")
+    .order("batch_number", { ascending: false })
+    .limit(1);
+
+  const maxBatch = batchData?.[0]?.batch_number;
+  if (maxBatch == null) return [];
+
+  const { data } = await supabase
+    .from("projects")
+    .select("pqi_time, pqi_cost, percentage_progress, schedule_health, financial_health, project_manager, project_category, total_budget, budget_usage")
+    .eq("batch_number", maxBatch);
+
+  return (data ?? []) as Project[];
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [summaryStats, setSummaryStats] = useState<DashboardStats | null>(null);
-  const [businessRules, setBusinessRules] = useState<BusinessRules>(defaultBusinessRules);
-  const [loading, setLoading] = useState(true);
+  const { data: businessRules = defaultBusinessRules } = useQuery({
+    queryKey: ["business-rules"],
+    queryFn: fetchBusinessRules,
+    staleTime: 10 * 60 * 1000, // 10 minutes — rarely changes
+  });
 
-  useEffect(() => {
-    const loadRules = async () => {
-      try {
-        const response = await fetch("/api/business-rules");
-        const payload = (await response.json()) as { rules?: BusinessRules };
-        if (response.ok && payload.rules) {
-          setBusinessRules(payload.rules);
-        }
-      } catch {
-        // Keep defaults if the rules endpoint is unavailable.
-      }
-    };
+  const { data: rpcSummary, isLoading: rpcLoading } = useQuery({
+    queryKey: ["dashboard-summary"],
+    queryFn: fetchDashboardSummary,
+    staleTime: 2 * 60 * 1000,
+    enabled: isSupabaseConfigured,
+  });
 
-    void loadRules();
-  }, []);
+  // Only fetch raw projects when the RPC returned null (server-side function unavailable)
+  const { data: fallbackProjects = [], isLoading: fallbackLoading } = useQuery({
+    queryKey: ["dashboard-fallback-projects"],
+    queryFn: fetchFallbackProjects,
+    staleTime: 2 * 60 * 1000,
+    enabled: isSupabaseConfigured && rpcSummary === null && !rpcLoading,
+  });
 
-  useEffect(() => {
-    const fetchData = async () => {
-      if (!isSupabaseConfigured) { setLoading(false); return; }
+  const loading = rpcLoading || (rpcSummary === null && fallbackLoading);
 
-      let rpcSummary: DashboardSummaryRow | null = null;
-
-      try {
-        const { data: summaryData, error: summaryError } = await supabase.rpc("get_dashboard_summary");
-        if (!summaryError && summaryData) {
-          const row = Array.isArray(summaryData) ? summaryData[0] : summaryData;
-          if (row) {
-            rpcSummary = row as DashboardSummaryRow;
-          }
-        }
-      } catch (err) {
-        console.error("RPC failed, falling back to manual computation:", err);
-      }
-
-      if (rpcSummary) {
-        setSummaryStats(mapDashboardSummary(rpcSummary));
-      } else {
-        // Fetch Projects only when RPC is unavailable and we must compute fallback stats.
-        const { data: maxProjBatchData } = await supabase
-          .from("projects")
-          .select("batch_number")
-          .order("batch_number", { ascending: false })
-          .limit(1);
-
-        const maxProjBatch = maxProjBatchData && maxProjBatchData.length > 0 ? maxProjBatchData[0].batch_number : null;
-
-        if (maxProjBatch !== null) {
-          const { data: projData } = await supabase
-            .from("projects")
-            .select("pqi_time, pqi_cost, percentage_progress, schedule_health, financial_health, project_manager, project_category, total_budget, budget_usage")
-            .eq("batch_number", maxProjBatch);
-          if (projData) setProjects(projData as Project[]);
-        }
-
-        setSummaryStats(null);
-      }
-
-      setLoading(false);
-    };
-    void fetchData();
-  }, []);
-
-  // ── Computed Stats ─────────────────────────────────────────────────────────
-  const fallbackStats = useMemo(() => {
-    const total = projects.length;
-    if (total === 0) return null;
+  // ── Fallback computation ───────────────────────────────────────────────────
+  const fallbackStats = useMemo<DashboardStats | null>(() => {
+    if (fallbackProjects.length === 0) return null;
 
     const avg = (arr: (number | null)[]) => {
       const vals = arr.filter((v): v is number => v !== null);
       return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
     };
 
-    // KPI averages: exclude maintenance projects AND only include specific PMs
-    const kpiProjects = projects.filter(
+    const kpiProjects = fallbackProjects.filter(
       p =>
         p.project_category?.toLowerCase() !== "maintenance" &&
         businessRules.kpiProjectManagers.includes(p.project_manager?.toLowerCase() ?? "")
@@ -234,28 +214,26 @@ export default function DashboardPage() {
     const avgPqiTime  = avg(kpiProjects.map(p => p.pqi_time));
     const avgPqiCost  = avg(kpiProjects.map(p => p.pqi_cost));
 
-    // PQI Time Health buckets (only specific PMs, no maintenance)
     const pqiBuckets: Record<string, number> = { Black: 0, Red: 0, Yellow: 0, Green: 0 };
-    kpiProjects.forEach(p => { pqiBuckets[getPqiBucket(p.pqi_time)]++; });
-    const pqiTimeData = Object.entries(pqiBuckets)
-      .filter(([,v]) => v > 0)
-      .map(([name, value]) => ({ name, value }));
-
-    // PQI Cost Health buckets (only specific PMs, no maintenance)
     const pqiCostBuckets: Record<string, number> = { Black: 0, Red: 0, Yellow: 0, Green: 0 };
-    kpiProjects.forEach(p => { pqiCostBuckets[getPqiBucket(p.pqi_cost)]++; });
-    const pqiCostData = Object.entries(pqiCostBuckets)
-      .filter(([,v]) => v > 0)
-      .map(([name, value]) => ({ name, value }));
+    const pmMap: Record<string, number> = {};
+    const catMap: Record<string, number> = {};
 
-    // Progress buckets
-    const progBands = [
+    for (const p of kpiProjects) {
+      pqiBuckets[getPqiBucket(p.pqi_time)]++;
+      pqiCostBuckets[getPqiBucket(p.pqi_cost)]++;
+    }
+    for (const p of fallbackProjects) {
+      pmMap[p.project_manager || "Unknown"] = (pmMap[p.project_manager || "Unknown"] || 0) + 1;
+      catMap[p.project_category || "Unknown"] = (catMap[p.project_category || "Unknown"] || 0) + 1;
+    }
+
+    const progressData = [
       { name: "0–25%",   range: [0, 25] },
       { name: "26–50%",  range: [26, 50] },
       { name: "51–75%",  range: [51, 75] },
       { name: "76–100%", range: [76, 100] },
-    ];
-    const progressData = progBands.map(b => ({
+    ].map(b => ({
       name: b.name,
       count: kpiProjects.filter(p => {
         const v = p.percentage_progress ?? 0;
@@ -263,49 +241,28 @@ export default function DashboardPage() {
       }).length,
     }));
 
-    // Top PMs
-    const pmMap: Record<string, number> = {};
-    projects.forEach(p => {
-      const k = p.project_manager || "Unknown";
-      pmMap[k] = (pmMap[k] || 0) + 1;
-    });
-    const pmData = Object.entries(pmMap)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10)
-      .map(([name, value]) => ({ name, value }));
-
-    // Category
-    const catMap: Record<string, number> = {};
-    projects.forEach(p => {
-      const k = p.project_category || "Unknown";
-      catMap[k] = (catMap[k] || 0) + 1;
-    });
-    const catData = Object.entries(catMap).map(([name, value]) => ({ name, value }));
-
-    // Budget top 10 (only projects with data)
-    const budgetData = projects
-      .filter(p => p.total_budget && p.total_budget > 0)
-      .sort((a, b) => (b.total_budget ?? 0) - (a.total_budget ?? 0))
-      .slice(0, 10)
-      .map((p, i) => ({
-        name: `P${i + 1}`,
-        budget: Math.round((p.total_budget ?? 0) / 1_000_000),
-        usage:  Math.round((p.budget_usage  ?? 0) / 1_000_000),
-      }));
-
-
-    const totalGrossProfit = 0;
-
     return {
-      total, avgProgress, avgPqiTime, avgPqiCost,
-      pqiTimeData, pqiCostData,
-      progressData, pmData, catData, budgetData, totalGrossProfit,
+      total: fallbackProjects.length,
+      avgProgress, avgPqiTime, avgPqiCost,
+      pqiTimeData: Object.entries(pqiBuckets).filter(([, v]) => v > 0).map(([name, value]) => ({ name, value })),
+      pqiCostData: Object.entries(pqiCostBuckets).filter(([, v]) => v > 0).map(([name, value]) => ({ name, value })),
+      progressData,
+      pmData: Object.entries(pmMap).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, value]) => ({ name, value })),
+      catData: Object.entries(catMap).map(([name, value]) => ({ name, value })),
+      budgetData: fallbackProjects
+        .filter(p => p.total_budget && p.total_budget > 0)
+        .sort((a, b) => (b.total_budget ?? 0) - (a.total_budget ?? 0))
+        .slice(0, 10)
+        .map((p, i) => ({
+          name: `P${i + 1}`,
+          budget: Math.round((p.total_budget ?? 0) / 1_000_000),
+          usage: Math.round((p.budget_usage ?? 0) / 1_000_000),
+        })),
+      totalGrossProfit: 0,
     };
-  }, [businessRules.kpiProjectManagers, projects]);
+  }, [businessRules.kpiProjectManagers, fallbackProjects]);
 
-  const stats = summaryStats ?? fallbackStats;
-
-  // ── Empty State ────────────────────────────────────────────────────────────
+  const stats = rpcSummary ? mapDashboardSummary(rpcSummary) : fallbackStats;
   const isEmpty = !loading && (!stats || stats.total === 0);
 
   return (
@@ -345,159 +302,16 @@ export default function DashboardPage() {
         </section>
       )}
 
-
-
-      {/* Row 3: PQI Time + PQI Cost */}
       {(loading || stats) && (
-        <section className="grid gap-4 lg:grid-cols-2">
-          <Card className="border shadow-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2"><Clock className="h-4 w-4 text-amber-500" /> PQI Time Health</CardTitle>
-              <CardDescription>Project count by schedule performance bucket</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {loading ? <Skeleton className="h-56 w-full" /> : (
-                <ResponsiveContainer width="100%" height={220}>
-                  <PieChart>
-                    <Pie data={stats!.pqiTimeData} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={3} dataKey="value" label={({ name, percent = 0 }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false}>
-                      {stats!.pqiTimeData.map((entry) => (
-                        <Cell key={entry.name} fill={PQI_COLORS[entry.name as keyof typeof PQI_COLORS] ?? "#94a3b8"} />
-                      ))}
-                    </Pie>
-                    <Tooltip content={<ChartTooltip />} />
-                  </PieChart>
-                </ResponsiveContainer>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="border shadow-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2"><DollarSign className="h-4 w-4 text-rose-500" /> PQI Cost Health</CardTitle>
-              <CardDescription>Project count by cost performance bucket</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {loading ? <Skeleton className="h-56 w-full" /> : (
-                <ResponsiveContainer width="100%" height={220}>
-                  <PieChart>
-                    <Pie data={stats!.pqiCostData} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={3} dataKey="value" label={({ name, percent = 0 }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false}>
-                      {stats!.pqiCostData.map((entry) => (
-                        <Cell key={entry.name} fill={PQI_COLORS[entry.name as keyof typeof PQI_COLORS] ?? "#94a3b8"} />
-                      ))}
-                    </Pie>
-                    <Tooltip content={<ChartTooltip />} />
-                  </PieChart>
-                </ResponsiveContainer>
-              )}
-            </CardContent>
-          </Card>
-        </section>
-      )}
-
-      {/* Row 3: Progress Distribution + Category */}
-      {(loading || stats) && (
-        <section className="grid gap-4 lg:grid-cols-3">
-          <Card className="border shadow-sm lg:col-span-2">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2"><TrendingUp className="h-4 w-4 text-indigo-500" /> Progress Distribution</CardTitle>
-              <CardDescription>Number of projects in each completion band</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {loading ? <Skeleton className="h-56 w-full" /> : (
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={stats!.progressData} barSize={40}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
-                    <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                    <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-                    <Tooltip content={<ChartTooltip />} />
-                    <Bar dataKey="count" name="Projects" radius={[6, 6, 0, 0]}>
-                      {stats!.progressData.map((_, i) => (
-                        <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="border shadow-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2"><FolderKanban className="h-4 w-4 text-violet-500" /> By Category</CardTitle>
-              <CardDescription>Project count per category</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {loading ? <Skeleton className="h-56 w-full" /> : (
-                <ResponsiveContainer width="100%" height={220}>
-                  <PieChart>
-                    <Pie data={stats!.catData} cx="50%" cy="50%" outerRadius={80} dataKey="value">
-                      {stats!.catData.map((_, i) => (
-                        <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip content={<ChartTooltip />} />
-                    <Legend iconSize={8} iconType="circle" wrapperStyle={{ fontSize: "11px" }} />
-                  </PieChart>
-                </ResponsiveContainer>
-              )}
-            </CardContent>
-          </Card>
-        </section>
-      )}
-
-      {/* Row 4: Top PMs */}
-      {(loading || stats) && (
-        <section className="grid gap-4 lg:grid-cols-3">
-          <Card className="border shadow-sm lg:col-span-2">
-            <CardHeader>
-              <CardTitle>Top 10 Project Managers</CardTitle>
-              <CardDescription>Project count per PM</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {loading ? <Skeleton className="h-64 w-full" /> : (
-                <ResponsiveContainer width="100%" height={260}>
-                  <BarChart data={stats!.pmData} layout="vertical" barSize={16}>
-                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--border)" />
-                    <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
-                    <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={130} />
-                    <Tooltip content={<ChartTooltip />} />
-                    <Bar dataKey="value" name="Projects" radius={[0, 6, 6, 0]}>
-                      {stats!.pmData.map((_, i) => (
-                        <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </CardContent>
-          </Card>
-
-
-          {/* Budget Overview */}
-          <Card className="border shadow-sm">
-            <CardHeader>
-              <CardTitle>Budget vs Usage</CardTitle>
-              <CardDescription>Top 10 projects by budget (in million)</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {loading ? <Skeleton className="h-64 w-full" /> : stats!.budgetData.length === 0 ? (
-                <p className="text-xs text-muted-foreground py-8 text-center">No budget data available</p>
-              ) : (
-                <ResponsiveContainer width="100%" height={260}>
-                  <BarChart data={stats!.budgetData} barSize={10}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
-                    <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                    <YAxis tick={{ fontSize: 10 }} />
-                    <Tooltip content={<ChartTooltip />} />
-                    <Legend iconSize={8} wrapperStyle={{ fontSize: "11px" }} />
-                    <Bar dataKey="budget" name="Budget (M)" fill="#6366f1" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="usage"  name="Usage (M)"  fill="#f59e0b" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </CardContent>
-          </Card>
-        </section>
+        <DashboardCharts
+          loading={loading}
+          pqiTimeData={(stats?.pqiTimeData ?? []) as { name: string; value: number }[]}
+          pqiCostData={(stats?.pqiCostData ?? []) as { name: string; value: number }[]}
+          progressData={(stats?.progressData ?? []) as { name: string; count: number }[]}
+          pmData={(stats?.pmData ?? []) as { name: string; value: number }[]}
+          catData={(stats?.catData ?? []) as { name: string; value: number }[]}
+          budgetData={(stats?.budgetData ?? []) as { name: string; budget: number; usage: number }[]}
+        />
       )}
     </div>
   );

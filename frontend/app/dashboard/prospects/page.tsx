@@ -11,13 +11,15 @@ import {
   Download, Inbox 
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import * as XLSX from "xlsx";
+// xlsx is ~400 KB — loaded only when the user uploads or exports
 import { authenticatedFetch } from "@/lib/authenticated-fetch";
 import { defaultBusinessRules, type BusinessRules } from "@/lib/business-rules.shared";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { formatDate, parseDate, parseNumeric, parseText } from "@/lib/excel-utils";
 import { cn } from "@/lib/utils";
 import { determineCategory } from "@/lib/classification";
+import { prospectRowSchema, validateRows } from "@/lib/excel-row-schemas";
+import { parseXlsxInWorker } from "@/lib/use-xlsx-parser";
 import type { Tables, Database } from "@/lib/database.types";
 
 type Prospect = Tables<"prospects">;
@@ -279,12 +281,8 @@ export default function ProspectsPage() {
     setSuccess("");
 
     try {
-      const data = await file.arrayBuffer();
-      const workbook = XLSX.read(data, { type: "array" });
-      const sheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[sheetName];
-      
-      const json = XLSX.utils.sheet_to_json(worksheet, { defval: null }) as Record<string, unknown>[];
+      const buffer = await file.arrayBuffer();
+      const json = await parseXlsxInWorker(buffer);
 
       if (json.length === 0) {
         throw new Error("Invalid Prospects template: file is empty or has no data rows.");
@@ -316,7 +314,17 @@ export default function ProspectsPage() {
           `Invalid Prospects template. Missing required columns: ${missing.join(", ")}`
         );
       }
-      
+
+      // Per-row Zod validation — catches silently-missing columns and type mismatches
+      const normalizedJson = json.map((r) =>
+        Object.fromEntries(Object.entries(r).map(([k, v]) => [k.trim().toUpperCase(), v]))
+      );
+      const { invalidCount, firstErrors } = validateRows(prospectRowSchema, normalizedJson);
+      if (invalidCount > 0) {
+        console.warn(`[Prospects] ${invalidCount} row(s) failed validation:`, firstErrors);
+        setSuccess(`Warning: ${invalidCount} row(s) had unexpected values and were coerced to null. First issues: ${firstErrors.slice(0, 2).join("; ")}`);
+      }
+
       // AM validation is now non-blocking as per user request.
       // We still track unknown AMs for potential logging/debugging but we don't throw.
       const unknownAMs = Array.from(new Set(
@@ -498,6 +506,7 @@ export default function ProspectsPage() {
         'CATEGORY_NOTE': p.category_note
       }));
 
+      const XLSX = await import("xlsx");
       const ws = XLSX.utils.json_to_sheet(exportData);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Prospects");

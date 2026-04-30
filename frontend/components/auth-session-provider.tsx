@@ -5,6 +5,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -28,14 +29,30 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
   const [role, setRole] = useState<Tables<"profiles">["role"]>(null);
   const [loading, setLoading] = useState(true);
 
+  // Cache the last fetched user ID so auth-state events don't re-query the
+  // profile when the user hasn't changed (e.g. token refresh events).
+  const lastFetchedUserId = useRef<string | null>(null);
+
   useEffect(() => {
     if (!isSupabaseConfigured) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLoading(false);
       return;
     }
 
     let active = true;
+
+    const fetchProfileForUser = async (userId: string) => {
+      if (lastFetchedUserId.current === userId) return; // already cached
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (active) {
+        lastFetchedUserId.current = userId;
+        setRole(profile?.role ?? null);
+      }
+    };
 
     const initializeSession = async () => {
       const { data, error } = await supabase.auth.getSession();
@@ -48,19 +65,14 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
       }
 
       setSession(data.session);
-      
+
       if (data.session?.user) {
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("role")
-          .eq("user_id", data.session.user.id)
-          .maybeSingle();
-        if (active) setRole(profile?.role ?? null);
+        await fetchProfileForUser(data.session.user.id);
       } else {
         setRole(null);
       }
 
-      setLoading(false);
+      if (active) setLoading(false);
     };
 
     void initializeSession();
@@ -71,18 +83,13 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
       if (!active) return;
 
       setSession(currentSession);
-      
+
       if (currentSession?.user) {
-        void supabase
-          .from("profiles")
-          .select("role")
-          .eq("user_id", currentSession.user.id)
-          .maybeSingle()
-          .then(({ data: profile }) => {
-            if (active) setRole(profile?.role ?? null);
-            setLoading(false);
-          });
+        void fetchProfileForUser(currentSession.user.id).then(() => {
+          if (active) setLoading(false);
+        });
       } else {
+        lastFetchedUserId.current = null;
         setRole(null);
         setLoading(false);
       }

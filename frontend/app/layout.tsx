@@ -5,6 +5,7 @@ import "./globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthSessionProvider } from "@/components/auth-session-provider";
 import { ThemeProvider } from "@/components/theme-provider";
+import { ReactQueryProvider } from "@/components/react-query-provider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -51,11 +52,13 @@ export default function RootLayout({
             })();`,
           }}
         />
-        <TooltipProvider>
-          <ThemeProvider>
-            <AuthSessionProvider>{children}</AuthSessionProvider>
-          </ThemeProvider>
-        </TooltipProvider>
+        <ReactQueryProvider>
+          <TooltipProvider>
+            <ThemeProvider>
+              <AuthSessionProvider>{children}</AuthSessionProvider>
+            </ThemeProvider>
+          </TooltipProvider>
+        </ReactQueryProvider>
       </body>
     </html>
   );

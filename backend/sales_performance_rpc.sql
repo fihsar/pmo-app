@@ -26,6 +26,7 @@ RETURNS TABLE (
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
+SET search_path = public
 AS $$
 WITH 
 allowed_ams AS (
@@ -52,8 +53,8 @@ latest_backlog AS (
       ON lower(trim(COALESCE(account_manager, ''))) = a.normalized_name
     WHERE batch_number = get_latest_batch('targets')
       AND (invoice_date IS NULL OR to_char(invoice_date, 'YYYY') <> '2025')
-      AND (p_start_date IS NULL OR p_start_date = '' OR target_date >= p_start_date::date)
-      AND (p_end_date IS NULL OR p_end_date = '' OR target_date <= p_end_date::date)
+      AND (p_start_date IS NULL OR p_start_date = '' OR target_date >= (p_start_date::timestamptz AT TIME ZONE 'Asia/Jakarta')::date)
+      AND (p_end_date   IS NULL OR p_end_date   = '' OR target_date <= (p_end_date::timestamptz   AT TIME ZONE 'Asia/Jakarta')::date)
     GROUP BY 1
 ),
 latest_prospects AS (
@@ -64,8 +65,8 @@ latest_prospects AS (
     JOIN allowed_ams a
       ON lower(trim(COALESCE(am_name, ''))) = a.normalized_name
     WHERE batch_number = get_latest_batch('prospects')
-      AND (p_start_date IS NULL OR p_start_date = '' OR target_date >= p_start_date::date)
-      AND (p_end_date IS NULL OR p_end_date = '' OR target_date <= p_end_date::date)
+      AND (p_start_date IS NULL OR p_start_date = '' OR target_date >= (p_start_date::timestamptz AT TIME ZONE 'Asia/Jakarta')::date)
+      AND (p_end_date   IS NULL OR p_end_date   = '' OR target_date <= (p_end_date::timestamptz   AT TIME ZONE 'Asia/Jakarta')::date)
     GROUP BY 1
 ),
 all_names AS (
