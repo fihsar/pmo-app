@@ -17,7 +17,6 @@ import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { authenticatedFetchJson } from "@/lib/authenticated-fetch";
 import type { Database } from "@/lib/database.types";
-import type { SalesTargets } from "@/lib/sales-targets.shared";
 
 // --- Types ---
 type SalesPerformance = Database["public"]["Functions"]["get_sales_performance_summary"]["Returns"][0];
@@ -48,27 +47,24 @@ export default function SalesPerformancePage() {
     setError("");
 
     try {
-      const [rpcResult, targetsResult] = await Promise.all([
+      const [rpcResult, rulesResult] = await Promise.all([
         supabase.rpc("get_sales_performance_summary", {
           p_start_date: startDate || null,
           p_end_date: endDate || null,
         }),
-        authenticatedFetchJson<SalesTargets>("/api/sales-targets").catch(() => null),
+        authenticatedFetchJson<{ rules: { targetGrossProfit: number } }>("/api/business-rules").catch(() => null),
       ]);
 
       const { data: rpcData, error: rpcError } = rpcResult;
       if (rpcError) throw rpcError;
 
       if (rpcData) {
-        // Sort by total opportunity descending by default
         const sorted = (rpcData as SalesPerformance[]).sort((a, b) => b.total_opportunity - a.total_opportunity);
         setData(sorted);
       }
 
-      // Compute company target as sum of all AM annual targets
-      if (targetsResult) {
-        const total = targetsResult.amTargets.reduce((sum, am) => sum + am.annualTarget, 0);
-        setCompanyTarget(total);
+      if (rulesResult) {
+        setCompanyTarget(rulesResult.rules.targetGrossProfit);
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -359,13 +355,13 @@ export default function SalesPerformancePage() {
                         Rp {Math.round(item.am_target).toLocaleString('id-ID')}
                       </td>
                       <td className="py-3 px-4 text-right font-medium text-indigo-600 dark:text-indigo-400">
-                        Rp {item.backlog.toLocaleString('id-ID')}
+                        Rp {Math.round(item.backlog).toLocaleString('id-ID')}
                       </td>
                       <td className="py-3 px-4 text-right text-muted-foreground">
-                        Rp {item.prospect_pipeline.toLocaleString('id-ID')}
+                        Rp {Math.round(item.prospect_pipeline).toLocaleString('id-ID')}
                       </td>
                       <td className="py-3 px-4 text-right font-semibold">
-                        Rp {item.total_opportunity.toLocaleString('id-ID')}
+                        Rp {Math.round(item.total_opportunity).toLocaleString('id-ID')}
                       </td>
                       <td className="py-3 px-4 text-center">
                         <span className={cn(
@@ -374,7 +370,7 @@ export default function SalesPerformancePage() {
                           item.achievement_percent >= 50 ? "bg-blue-100 text-blue-700 border-blue-200" :
                           "bg-slate-100 text-slate-700 border-slate-200"
                         )}>
-                          {item.achievement_percent.toFixed(1)}%
+                          {item.achievement_percent.toFixed(2)}%
                         </span>
                       </td>
                     </tr>
