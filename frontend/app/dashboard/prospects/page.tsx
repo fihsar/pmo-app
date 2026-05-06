@@ -13,6 +13,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 // xlsx is ~400 KB — loaded only when the user uploads or exports
 import { authenticatedFetch } from "@/lib/authenticated-fetch";
+import { authenticatedFetchJson } from "@/lib/authenticated-fetch";
 import { defaultBusinessRules, type BusinessRules } from "@/lib/business-rules.shared";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { formatDate, parseDate, parseNumeric, parseText } from "@/lib/excel-utils";
@@ -21,6 +22,8 @@ import { determineCategory } from "@/lib/classification";
 import { prospectRowSchema, validateRows } from "@/lib/excel-row-schemas";
 import { parseXlsxInWorker } from "@/lib/use-xlsx-parser";
 import type { Tables, Database } from "@/lib/database.types";
+import { BusinessRulesNotConfigured } from "@/components/business-rules-not-configured";
+import { useAuthSession } from "@/components/auth-session-provider";
 
 type Prospect = Tables<"prospects">;
 
@@ -35,6 +38,9 @@ const cssNameFallbackPatterns = [
 ];
 
 export default function ProspectsPage() {
+  const { session } = useAuthSession();
+  const isSuperadmin = session?.user?.user_metadata?.role === "Superadmin";
+  
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [totalProspectsCount, setTotalProspectsCount] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -43,6 +49,7 @@ export default function ProspectsPage() {
   const [totalAmount, setTotalAmount] = useState(0);
   const [totalGP, setTotalGP] = useState(0);
   const [businessRules, setBusinessRules] = useState<BusinessRules>(defaultBusinessRules);
+  const [rulesLoaded, setRulesLoaded] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
@@ -67,18 +74,19 @@ export default function ProspectsPage() {
   useEffect(() => {
     const loadRules = async () => {
       try {
-        const response = await fetch("/api/business-rules");
-        const payload = (await response.json()) as { rules?: BusinessRules };
-        if (response.ok && payload.rules) {
+        const payload = await authenticatedFetchJson<{ rules?: BusinessRules }>("/api/business-rules");
+        if (payload.rules) {
           setBusinessRules(payload.rules);
         }
       } catch {
         // Keep defaults.
+      } finally {
+        setRulesLoaded(true);
       }
     };
 
     void loadRules();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const allowedAMs = businessRules.allowedAccountManagers;
   const allowedAMMap = useMemo(
@@ -194,10 +202,9 @@ export default function ProspectsPage() {
       // Fetch subtotals using RPC
       const { data: aggregateData, error: aggregateError } = await supabase.rpc("get_prospects_subtotals", {
         p_batch_number: maxBatch,
-        p_allowed_ams: allowedAMs,
         p_search_query: debouncedSearchQuery.trim() ? escapeSearch(debouncedSearchQuery) : "",
-        p_start_date: startDate || null,
-        p_end_date: endDate || null,
+        p_start_date: startDate || undefined,
+        p_end_date: endDate || undefined,
         p_category_filter: categoryFilter
       });
 
@@ -529,6 +536,12 @@ export default function ProspectsPage() {
 
   const totalPages = Math.ceil(totalProspectsCount / pageSize);
 
+  // Only show banner after rules have loaded to avoid flash with empty defaults
+  const missingFields: string[] = [];
+  if (rulesLoaded && allowedAMs.length === 0) {
+    missingFields.push("allowedAccountManagers");
+  }
+
 
   const renderSortableHeader = (label: React.ReactNode, key: keyof Prospect, title?: string, align: "left" | "center" = "left", className?: string) => {
     const isActive = sortConfig?.key === key;
@@ -561,6 +574,8 @@ export default function ProspectsPage() {
 
   return (
     <div className="space-y-6">
+      <BusinessRulesNotConfigured isSuperadmin={isSuperadmin} missingFields={missingFields} />
+      
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between rounded-2xl border bg-card p-6 shadow-sm">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">List of Prospects</h1>
@@ -569,14 +584,15 @@ export default function ProspectsPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="outline" asChild disabled={loading}>
-            <label className="cursor-pointer flex items-center gap-2">
+          <Button variant="outline" asChild disabled={loading || !rulesLoaded}>
+            <label className={`flex items-center gap-2 ${loading || !rulesLoaded ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}>
               <Upload className="h-4 w-4" />
-              Upload Excel
+              {rulesLoaded ? "Upload Excel" : "Loading..."}
               <input
                 type="file"
                 className="hidden"
                 accept=".xlsx, .xls"
+                disabled={loading || !rulesLoaded}
                 onChange={handleFileUpload}
               />
             </label>

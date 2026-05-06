@@ -12,6 +12,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 // xlsx is ~400 KB — loaded only when the user uploads or exports
 import { authenticatedFetch } from "@/lib/authenticated-fetch";
+import { authenticatedFetchJson } from "@/lib/authenticated-fetch";
 import { defaultBusinessRules, type BusinessRules } from "@/lib/business-rules.shared";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -123,6 +124,7 @@ export default function ProjectsPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [businessRules, setBusinessRules] = useState<BusinessRules>(defaultBusinessRules);
+  const [rulesLoaded, setRulesLoaded] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
@@ -144,18 +146,19 @@ export default function ProjectsPage() {
   useEffect(() => {
     const loadRules = async () => {
       try {
-        const response = await fetch("/api/business-rules");
-        const payload = (await response.json()) as { rules?: BusinessRules };
-        if (response.ok && payload.rules) {
+        const payload = await authenticatedFetchJson<{ rules?: BusinessRules }>("/api/business-rules");
+        if (payload.rules) {
           setBusinessRules(payload.rules);
         }
       } catch {
         // Keep defaults.
+      } finally {
+        setRulesLoaded(true);
       }
     };
 
     void loadRules();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const escapeSearch = (value: string) => value.trim().replace(/,/g, " ");
 
@@ -563,14 +566,15 @@ export default function ProjectsPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="outline" asChild disabled={loading}>
-            <label className="cursor-pointer flex items-center gap-2">
+          <Button variant="outline" asChild disabled={loading || !rulesLoaded}>
+            <label className={`flex items-center gap-2 ${loading || !rulesLoaded ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}>
               <Upload className="h-4 w-4" />
-              Upload Excel
+              {rulesLoaded ? "Upload Excel" : "Loading..."}
               <input
                 type="file"
                 className="hidden"
                 accept=".xlsx, .xls, .csv"
+                disabled={loading || !rulesLoaded}
                 onChange={handleFileUpload}
               />
             </label>

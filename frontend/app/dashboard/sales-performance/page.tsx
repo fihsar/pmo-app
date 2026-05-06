@@ -19,7 +19,14 @@ import { authenticatedFetchJson } from "@/lib/authenticated-fetch";
 import type { Database } from "@/lib/database.types";
 
 // --- Types ---
-type SalesPerformance = Database["public"]["Functions"]["get_sales_performance_summary"]["Returns"][0];
+type SalesPerformance = {
+  achievement_percent: number;
+  am_target: number;
+  backlog: number;
+  prospect_pipeline: number;
+  sales_person: string;
+  total_opportunity: number;
+};
 
 export default function SalesPerformancePage() {
   const [data, setData] = useState<SalesPerformance[]>([]);
@@ -49,14 +56,17 @@ export default function SalesPerformancePage() {
     try {
       const [rpcResult, rulesResult] = await Promise.all([
         supabase.rpc("get_sales_performance_summary", {
-          p_start_date: startDate || null,
-          p_end_date: endDate || null,
+          p_start_date: startDate || undefined,
+          p_end_date: endDate || undefined,
         }),
         authenticatedFetchJson<{ rules: { targetGrossProfit: number } }>("/api/business-rules").catch(() => null),
       ]);
 
       const { data: rpcData, error: rpcError } = rpcResult;
-      if (rpcError) throw rpcError;
+      if (rpcError) {
+        console.error("[SalesPerformance] RPC error:", rpcError);
+        throw new Error(rpcError.message ?? rpcError.code ?? "RPC failed");
+      }
 
       if (rpcData) {
         const sorted = (rpcData as SalesPerformance[]).sort((a, b) => b.total_opportunity - a.total_opportunity);
@@ -69,7 +79,7 @@ export default function SalesPerformancePage() {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.error("Failed to load sales performance:", message);
-      setError("Failed to load performance data. Ensure SQL migrations are applied.");
+      setError(`Failed to load performance data: ${message}`);
     } finally {
       setLoading(false);
       const endTime = performance.now();
@@ -136,7 +146,7 @@ export default function SalesPerformancePage() {
 
   // Aggregated totals for KPI cards
   const totals = useMemo(() => {
-    return data.reduce((acc, curr) => ({
+    return data.reduce((acc, curr: SalesPerformance) => ({
       backlog: acc.backlog + curr.backlog,
       pipeline: acc.pipeline + curr.prospect_pipeline,
       opportunity: acc.opportunity + curr.total_opportunity,
@@ -144,7 +154,7 @@ export default function SalesPerformancePage() {
   }, [data]);
 
   const handleExport = () => {
-    const exportData = filteredData.map(item => ({
+    const exportData = filteredData.map((item: SalesPerformance) => ({
       'Account Manager': item.sales_person,
       'AM Target': Math.round(item.am_target),
       'Total Backlog (GP)': Math.round(item.backlog),
@@ -162,7 +172,7 @@ export default function SalesPerformancePage() {
   const chartData = useMemo(() => {
     return filteredData
       .slice(0, 10)
-      .map(item => ({
+      .map((item: SalesPerformance) => ({
         name: item.sales_person,
         achievement: Math.round(item.achievement_percent),
         pipeline: Math.round(item.prospect_pipeline / 1_000_000),
@@ -348,7 +358,7 @@ export default function SalesPerformancePage() {
                     </td>
                   </tr>
                 ) : (
-                  filteredData.map((item, idx) => (
+                  filteredData.map((item: SalesPerformance, idx) => (
                     <tr key={idx} className="border-b last:border-0 hover:bg-muted/10 transition-colors whitespace-nowrap">
                       <td className="py-3 px-4 font-medium">{item.sales_person}</td>
                       <td className="py-3 px-4 text-right text-muted-foreground">

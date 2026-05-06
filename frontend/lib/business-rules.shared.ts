@@ -235,26 +235,13 @@ const DEFAULT_CSS_KEYWORDS = [
 
 export const defaultBusinessRules: BusinessRules = {
   targetGrossProfit: 36_000_000_000,
-  allowedAccountManagers: [
-    "Andrew Daniel Gunalan",
-    "Elsa Yolanda Simanjuntak",
-    "Graeta Venato",
-    "Lizty Latifah",
-    "M. Satria Manggala Yudha",
-    "Merlin",
-    "Pandu R Akbar",
-  ],
-  kpiProjectManagers: [
-    "yohanes ivan enda",
-    "khoirul tasya",
-    "mahendra gati",
-    "tasya tamaraputri",
-  ],
+  allowedAccountManagers: [],
+  kpiProjectManagers: [],
   keywordRules: {
-    strictFccKeywords: DEFAULT_STRICT_FCC_KEYWORDS,
-    strictCssKeywords: DEFAULT_STRICT_CSS_KEYWORDS,
-    fccKeywords: DEFAULT_FCC_KEYWORDS,
-    cssKeywords: DEFAULT_CSS_KEYWORDS,
+    strictFccKeywords: [],
+    strictCssKeywords: [],
+    fccKeywords: [],
+    cssKeywords: [],
   },
 };
 
@@ -291,17 +278,13 @@ export function normalizeBusinessRules(input: Partial<BusinessRules> | null | un
       typeof input?.targetGrossProfit === "number" && Number.isFinite(input.targetGrossProfit)
         ? input.targetGrossProfit
         : defaultBusinessRules.targetGrossProfit,
-    allowedAccountManagers:
-      allowedAccountManagers.length > 0 ? allowedAccountManagers : defaultBusinessRules.allowedAccountManagers,
-    kpiProjectManagers:
-      kpiProjectManagers.length > 0 ? kpiProjectManagers : defaultBusinessRules.kpiProjectManagers,
+    allowedAccountManagers,
+    kpiProjectManagers,
     keywordRules: {
-      strictFccKeywords:
-        strictFccKeywords.length > 0 ? strictFccKeywords : defaultBusinessRules.keywordRules.strictFccKeywords,
-      strictCssKeywords:
-        strictCssKeywords.length > 0 ? strictCssKeywords : defaultBusinessRules.keywordRules.strictCssKeywords,
-      fccKeywords: fccKeywords.length > 0 ? fccKeywords : defaultBusinessRules.keywordRules.fccKeywords,
-      cssKeywords: cssKeywords.length > 0 ? cssKeywords : defaultBusinessRules.keywordRules.cssKeywords,
+      strictFccKeywords,
+      strictCssKeywords,
+      fccKeywords,
+      cssKeywords,
     },
   };
 }

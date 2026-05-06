@@ -4,18 +4,9 @@ import { randomUUID } from "node:crypto";
 
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import type { AuditEvent, AuditEventInput } from "@/lib/audit-log.shared";
+import type { Database } from "@/lib/database.types";
 
-type AuditLogRow = {
-  id: string;
-  type: string;
-  action: string;
-  actor_email: string | null;
-  actor_role: string | null;
-  target_type: string;
-  target_label: string;
-  metadata: Record<string, unknown>;
-  created_at: string;
-};
+type AuditLogRow = Database["public"]["Tables"]["audit_log"]["Row"];
 
 function rowToEvent(row: AuditLogRow): AuditEvent {
   return {
@@ -26,30 +17,24 @@ function rowToEvent(row: AuditLogRow): AuditEvent {
     actorRole: row.actor_role,
     targetType: row.target_type,
     targetLabel: row.target_label,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    metadata: row.metadata as any,
+    metadata: row.metadata,
     createdAt: row.created_at,
   };
 }
 
-// audit_log and business_rules are not in the generated database.types yet.
-// Cast the admin client to `any` for these two tables only.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const db = () => getSupabaseAdmin() as any;
-
 export async function readAuditLog(): Promise<AuditEvent[]> {
-  const { data, error } = await db()
+  const { data, error } = await getSupabaseAdmin()
     .from("audit_log")
     .select("*")
     .order("created_at", { ascending: false })
     .limit(500);
 
   if (error) throw new Error(`Failed to read audit log: ${error.message}`);
-  return ((data ?? []) as AuditLogRow[]).map(rowToEvent);
+  return (data ?? []).map(rowToEvent);
 }
 
 export async function appendAuditEvent(input: AuditEventInput): Promise<AuditEvent> {
-  const row: AuditLogRow = {
+  const row: Database["public"]["Tables"]["audit_log"]["Insert"] = {
     id: randomUUID(),
     type: input.type,
     action: input.action,
@@ -57,16 +42,16 @@ export async function appendAuditEvent(input: AuditEventInput): Promise<AuditEve
     actor_role: input.actorRole,
     target_type: input.targetType,
     target_label: input.targetLabel,
-    metadata: (input.metadata ?? {}) as Record<string, unknown>,
+    metadata: (input.metadata ?? {}) as Database["public"]["Tables"]["audit_log"]["Insert"]["metadata"],
     created_at: input.createdAt ?? new Date().toISOString(),
   };
 
-  const { data, error } = await db()
+  const { data, error } = await getSupabaseAdmin()
     .from("audit_log")
     .insert(row)
     .select()
     .single();
 
   if (error) throw new Error(`Failed to append audit event: ${error.message}`);
-  return rowToEvent(data as AuditLogRow);
+  return rowToEvent(data);
 }

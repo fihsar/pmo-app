@@ -29,8 +29,18 @@ function parseNumeric(value: unknown): number | null {
 }
 
 function readFirst(row: Record<string, unknown>, keys: string[]): unknown {
+  // Try exact match first (fast path)
   for (const key of keys) {
     if (Object.prototype.hasOwnProperty.call(row, key)) return row[key];
+  }
+  // Fall back to case-insensitive + trimmed lookup for Excel columns
+  // whose casing may differ from the expected keys
+  const rowEntries = Object.entries(row);
+  for (const key of keys) {
+    const keyLower = key.toLowerCase().trim();
+    for (const [k, v] of rowEntries) {
+      if (k.trim().toLowerCase() === keyLower) return v;
+    }
   }
   return null;
 }

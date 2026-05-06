@@ -17,7 +17,7 @@ type AuthSessionContextValue = {
   session: Session | null;
   user: User | null;
   loading: boolean;
-  role: Tables<"profiles">["role"];
+  role: string | null;
   signOut: () => Promise<void>;
   refreshSession: () => Promise<void>;
 };
@@ -26,7 +26,7 @@ const AuthSessionContext = createContext<AuthSessionContextValue | undefined>(un
 
 export function AuthSessionProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
-  const [role, setRole] = useState<Tables<"profiles">["role"]>(null);
+  const [role, setRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Cache the last fetched user ID so auth-state events don't re-query the

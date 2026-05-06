@@ -18,6 +18,8 @@ import { defaultBusinessRules, type BusinessRules } from "@/lib/business-rules.s
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { Database, Tables } from "@/lib/database.types";
+import { BusinessRulesNotConfigured } from "@/components/business-rules-not-configured";
+import { useAuthSession } from "@/components/auth-session-provider";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Project = Pick<Tables<"projects">,
@@ -26,8 +28,8 @@ type Project = Pick<Tables<"projects">,
   "total_budget" | "budget_usage"
 >;
 
-type DashboardStatItem = Database["public"]["Functions"]["get_dashboard_summary"]["Returns"][0]["pqi_time_data"] extends (infer U)[] | null ? U : never;
-type DashboardBudgetItem = Database["public"]["Functions"]["get_dashboard_summary"]["Returns"][0]["budget_data"] extends (infer U)[] | null ? U : never;
+type DashboardStatItem = { name: string; value: number };
+type DashboardBudgetItem = { name: string; budget: number; usage: number };
 type DashboardSummaryRow = Database["public"]["Functions"]["get_dashboard_summary"]["Returns"][0];
 
 type DashboardStats = {
@@ -121,12 +123,12 @@ const mapDashboardSummary = (row: DashboardSummaryRow): DashboardStats => {
     avgProgress: toNumber(row.avg_progress),
     avgPqiTime: toNumber(row.avg_pqi_time),
     avgPqiCost: toNumber(row.avg_pqi_cost),
-    pqiTimeData: row.pqi_time_data ?? [],
-    pqiCostData: row.pqi_cost_data ?? [],
-    progressData: row.progress_data ?? [],
-    pmData: row.pm_data ?? [],
-    catData: row.cat_data ?? [],
-    budgetData: row.budget_data ?? [],
+    pqiTimeData: (row.pqi_time_data as DashboardStatItem[]) ?? [],
+    pqiCostData: (row.pqi_cost_data as DashboardStatItem[]) ?? [],
+    progressData: (row.progress_data as Array<{ name: string; count: number }>) ?? [],
+    pmData: (row.pm_data as DashboardStatItem[]) ?? [],
+    catData: (row.cat_data as DashboardStatItem[]) ?? [],
+    budgetData: (row.budget_data as DashboardBudgetItem[]) ?? [],
     totalGrossProfit: toNumber(row.total_gross_profit),
   };
 };
@@ -142,7 +144,11 @@ async function fetchBusinessRules(): Promise<BusinessRules> {
 async function fetchDashboardSummary(): Promise<DashboardSummaryRow | null> {
   if (!isSupabaseConfigured) return null;
 
+  const startTime = performance.now();
   const { data, error } = await supabase.rpc("get_dashboard_summary");
+  const endTime = performance.now();
+  console.log(`[Dashboard] Query latency: ${(endTime - startTime).toFixed(2)}ms`);
+  
   if (!error && data) {
     const row = Array.isArray(data) ? data[0] : data;
     return (row as DashboardSummaryRow) ?? null;
@@ -172,6 +178,9 @@ async function fetchFallbackProjects(): Promise<Project[]> {
 
 // ─────────────────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
+  const { session } = useAuthSession();
+  const isSuperadmin = session?.user?.user_metadata?.role === "Superadmin";
+  
   const { data: businessRules = defaultBusinessRules } = useQuery({
     queryKey: ["business-rules"],
     queryFn: fetchBusinessRules,
@@ -265,8 +274,17 @@ export default function DashboardPage() {
   const stats = rpcSummary ? mapDashboardSummary(rpcSummary) : fallbackStats;
   const isEmpty = !loading && (!stats || stats.total === 0);
 
+  // Only show banner if we're using fallback mode AND kpiProjectManagers is empty
+  // (because fallback mode needs kpiProjectManagers to filter KPI projects)
+  const missingFields: string[] = [];
+  if (rpcSummary === null && fallbackProjects.length > 0 && businessRules.kpiProjectManagers.length === 0) {
+    missingFields.push("kpiProjectManagers");
+  }
+
   return (
     <div className="space-y-6">
+      <BusinessRulesNotConfigured isSuperadmin={isSuperadmin} missingFields={missingFields} />
+      
       {/* Header */}
       <div className="rounded-2xl border bg-card p-6 shadow-sm">
         <h1 className="text-2xl font-semibold tracking-tight">Project Performance</h1>
