@@ -19,11 +19,30 @@ import { formatDate, parseDate, parseNumeric, parseText } from "@/lib/excel-util
 import { cn } from "@/lib/utils";
 import { Checkbox } from "@/components/ui/checkbox";
 import { determineCategory } from "@/lib/classification";
+import { getErrorMessage, isMissingSubcategoryError } from "@/lib/error-message";
+import { exportStyledXlsx } from "@/lib/styled-xlsx-export";
 import type { Tables, Database } from "@/lib/database.types";
 
 type ProjectTarget = Tables<"project_targets">;
 
 // Classification logic is now imported from @/lib/classification
+
+const normalizeExcelKey = (key: string) => key.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+const readExcelCell = (row: Record<string, unknown>, keys: string[]) => {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(row, key)) return row[key];
+  }
+
+  const entries = Object.entries(row).map(([key, value]) => [normalizeExcelKey(key), value] as const);
+  for (const key of keys) {
+    const normalizedKey = normalizeExcelKey(key);
+    const match = entries.find(([rowKey]) => rowKey === normalizedKey);
+    if (match) return match[1];
+  }
+
+  return null;
+};
 
 export default function ProjectTargetPage() {
   const [targets, setTargets] = useState<ProjectTarget[]>([]);
@@ -314,37 +333,38 @@ export default function ProjectTargetPage() {
       const newTargets: Database["public"]["Tables"]["project_targets"]["Insert"][] = json.map((row) => {
         const categoryResult = determineCategory(row, businessRules);
         return ({
-        target_id: parseNumeric(row["ID"]),
-        company_name: parseText(row["COMPANY_NAME"]),
-        project_id: parseText(row["PROJECT_ID"]),
-        customer: parseText(row["CUSTOMER"]),
-        project_name: parseText(row["PROJECT_NAME"]),
-        project_manager: parseText(row["PROJECT_MANAGER"]),
-        account_manager: parseText(row["ACCOUNT_MANAGER"]),
-        group_am: parseText(row["GROUP_AM"]),
-        is_po: parseText(row["IS_PO"]),
-        is_contract: parseText(row["IS_CONTRACT"]),
-        term_of_payment_sales: parseText(row["TERM_OF_PAYMENT_SALES"]),
-        invoice_status: parseText(row["INVOICE_STATUS"]),
-        project_category: parseText(row["PROJECT_CATEGORY"]),
-        project_tracking: parseText(row["PROJECT_TRACKING"]),
-        total: parseNumeric(row["TOTAL"]),
-        gp_acc: parseNumeric(row["GP_ACC"]),
-        net_profit_project: parseNumeric(row["NET_PROFIT_PROJECT"]),
-        npp_actual: parseNumeric(row["NPP_ACTUAL"]),
-        client_po_date: parseDate(row["CLIENT_PO_DATE"]),
-        invoice_number: parseText(row["INVOICE_NUMBER"]),
-        invoice_date: parseDate(row["INVOICE_DATE"]),
-        payment_date: parseDate(row["PAYMENT_DATE"]),
-        target_date: parseDate(row["TARGET_DATE"]),
-        target_invoice_r0: parseDate(row["TARGET_INVOICE_R0"]),
-        aging_invoice: parseNumeric(row["AGING_INVOICE"]),
-        count_target_change: parseNumeric(row["COUNT_TARGET_CHANGE"]),
-        history_update_target_date: parseText(row["HISTORY_UPDATE_TARGET_DATE"]),
-        last_update: parseDate(row["LAST_UPDATE"]),
-        reason_update: parseText(row["REASON_UPDATE"]),
+        target_id: parseNumeric(readExcelCell(row, ["ID"])),
+        company_name: parseText(readExcelCell(row, ["COMPANY_NAME"])),
+        project_id: parseText(readExcelCell(row, ["PROJECT_ID"])),
+        customer: parseText(readExcelCell(row, ["CUSTOMER"])),
+        project_name: parseText(readExcelCell(row, ["PROJECT_NAME"])),
+        project_manager: parseText(readExcelCell(row, ["PROJECT_MANAGER"])),
+        account_manager: parseText(readExcelCell(row, ["ACCOUNT_MANAGER"])),
+        group_am: parseText(readExcelCell(row, ["GROUP_AM"])),
+        is_po: parseText(readExcelCell(row, ["IS_PO"])),
+        is_contract: parseText(readExcelCell(row, ["IS_CONTRACT"])),
+        term_of_payment_sales: parseText(readExcelCell(row, ["TERM_OF_PAYMENT_SALES"])),
+        invoice_status: parseText(readExcelCell(row, ["INVOICE_STATUS"])),
+        project_category: parseText(readExcelCell(row, ["PROJECT_CATEGORY"])),
+        project_tracking: parseText(readExcelCell(row, ["PROJECT_TRACKING"])),
+        total: parseNumeric(readExcelCell(row, ["TOTAL"])),
+        gp_acc: parseNumeric(readExcelCell(row, ["GP_ACC"])),
+        net_profit_project: parseNumeric(readExcelCell(row, ["NET_PROFIT_PROJECT"])),
+        npp_actual: parseNumeric(readExcelCell(row, ["NPP_ACTUAL"])),
+        client_po_date: parseDate(readExcelCell(row, ["CLIENT_PO_DATE"])),
+        invoice_number: parseText(readExcelCell(row, ["INVOICE_NUMBER"])),
+        invoice_date: parseDate(readExcelCell(row, ["INVOICE_DATE"])),
+        payment_date: parseDate(readExcelCell(row, ["PAYMENT_DATE"])),
+        target_date: parseDate(readExcelCell(row, ["TARGET_DATE"])),
+        target_invoice_r0: parseDate(readExcelCell(row, ["TARGET_INVOICE_R0"])),
+        aging_invoice: parseNumeric(readExcelCell(row, ["AGING_INVOICE"])),
+        count_target_change: parseNumeric(readExcelCell(row, ["COUNT_TARGET_CHANGE"])),
+        history_update_target_date: parseText(readExcelCell(row, ["HISTORY_UPDATE_TARGET_DATE"])),
+        last_update: parseDate(readExcelCell(row, ["LAST_UPDATE"])),
+        reason_update: parseText(readExcelCell(row, ["REASON_UPDATE"])),
         category: categoryResult.category,
         category_note: categoryResult.category_note,
+        subcategory: categoryResult.subcategory,
       });
       });
 
@@ -399,7 +419,12 @@ export default function ProjectTargetPage() {
       await loadTargets();
     } catch (err: unknown) {
       console.error(err);
-      setError(`Failed to save to database. Note: You need to run the updated SQL script to create the 'project_targets' table first! Details: ${err instanceof Error ? err.message : String(err)}`);
+      const message = getErrorMessage(err);
+      if (isMissingSubcategoryError(message)) {
+        setError(`Failed to save to database. The database is missing the subcategory column. Apply backend/migrations/013_add_subcategory.sql, then retry. Details: ${message}`);
+      } else {
+        setError(`Failed to save to database. Details: ${message}`);
+      }
     } finally {
       setLoading(false);
       // Reset input
@@ -491,13 +516,11 @@ export default function ProjectTargetPage() {
         'PAYMENT_DATE': t.payment_date,
         'TARGET_DATE': t.target_date,
         'CATEGORY': t.category,
+        'SUBCATEGORY': t.subcategory,
         'STATUS': t.status || 'On Track'
       }));
 
-      const ws = XLSX.utils.json_to_sheet(exportData);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Backlog");
-      XLSX.writeFile(wb, `Backlog_Export_${new Date().toISOString().split('T')[0]}.xlsx`);
+      exportStyledXlsx(exportData, "Backlog", `Backlog_Export_${new Date().toISOString().split('T')[0]}.xlsx`);
       
       setSuccess(`Successfully exported ${data.length} records to Excel!`);
     } catch (err: unknown) {

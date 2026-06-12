@@ -1,10 +1,12 @@
 import { defaultBusinessRules, type BusinessRules } from "@/lib/business-rules.shared";
 
 export type Category = "FCC" | "CSS" | "UNCLASSIFIED";
+export type Subcategory = "PT" | "SA" | "MS" | "STS" | "SAPT";
 
 export type CategoryResult = {
   category: Category;
   category_note: "strict-override" | "col-based" | "keyword-based" | "split" | "manual-review";
+  subcategory: Subcategory | null;
 };
 
 const CATEGORY_NOTES: CategoryResult["category_note"][] = [
@@ -14,6 +16,9 @@ const CATEGORY_NOTES: CategoryResult["category_note"][] = [
   "split",
   "manual-review",
 ];
+
+const BUILT_IN_FCC_KEYWORDS = ["sam", "cdd", "wlf"];
+const WORD_BOUNDARY_KEYWORDS = ["cdd", "pam", "sam", "siem", "va", "wlf"];
 
 function normalizeText(value: unknown): string {
   return String(value || "")
@@ -51,8 +56,8 @@ function readNumeric(row: Record<string, unknown>, keys: string[]): number | nul
 
 function hasKeyword(text: string, keywords: string[]): boolean {
   return keywords.some((keyword) => {
-    if (keyword === "va") {
-      return /\bva\b/.test(text);
+    if (WORD_BOUNDARY_KEYWORDS.includes(keyword)) {
+      return new RegExp(`\\b${keyword}\\b`).test(text);
     }
     return text.includes(keyword);
   });
@@ -66,26 +71,114 @@ function parseCategoryNote(value: unknown): CategoryResult["category_note"] | nu
     : null;
 }
 
+function buildSubcategoryText(row: Record<string, unknown>): string {
+  return normalizeText([
+    readFirst(row, ["PROJECT_NAME", "PROSPECT_NAME", "project_name", "prospect_name"]),
+    readFirst(row, ["PROJECT_CATEGORY", "project_category"]),
+    readFirst(row, ["PROJECT_TRACKING", "project_tracking"]),
+    readFirst(row, ["CURRENT_STAGE", "current_stage"]),
+    readFirst(row, ["STATUS", "status"]),
+  ].filter(Boolean).join(" "));
+}
+
+export function determineSubcategory(
+  row: Record<string, unknown>,
+  category: Category
+): Subcategory | null {
+  if (category !== "CSS") return null;
+
+  const text = buildSubcategoryText(row);
+  const hasPt = hasKeyword(text, [
+    "pentest",
+    "penetration testing",
+    "penetration",
+    "vulnerability",
+    "vapt",
+    "va",
+  ]);
+  const hasSa = hasKeyword(text, [
+    "security audit",
+    "audit",
+    "iso 27001",
+    "iso27001",
+    "third party assessment",
+    "third party assesment",
+  ]);
+
+  if (hasPt && hasSa) return "SAPT";
+  if (hasPt) return "PT";
+  if (hasSa) return "SA";
+
+  if (hasKeyword(text, [
+    "managed services",
+    "managed service",
+    "patch management",
+    "security awareness",
+  ])) {
+    return "MS";
+  }
+
+  if (hasKeyword(text, [
+    "pluxee",
+    "bigfix",
+    "certificate lifecycle management",
+    "ciphertrust",
+    "data loss prevention",
+    "dlp",
+    "firewall",
+    "itam",
+    "it asset management",
+    "pengadaan server",
+    "sast",
+    "soar",
+    "tenable",
+    "cyfirma",
+    "threat intelligence",
+    "implementation",
+    "privilege access management",
+    "privileged access management",
+    "pam",
+    "blackberry",
+    "upgrade",
+    "upgrade siem",
+    "renewal",
+    "renewal siem",
+    "siem",
+    "license & support",
+    "local support",
+    "license",
+  ])) {
+    return "STS";
+  }
+
+  return null;
+}
+
 export function determineCategory(row: Record<string, unknown>, rules?: BusinessRules): CategoryResult {
   const existingCategory = String(readFirst(row, ["category", "CATEGORY", "project_category"]) || "");
   const name = normalizeText(readFirst(row, ["PROJECT_NAME", "PROSPECT_NAME", "project_name", "prospect_name"]));
   const keywordRules = rules?.keywordRules ?? defaultBusinessRules.keywordRules;
+  const result = (
+    category: Category,
+    category_note: CategoryResult["category_note"]
+  ): CategoryResult => ({
+    category,
+    category_note,
+    subcategory: determineSubcategory(row, category),
+  });
 
   // 1. Strict Overrides (Highest priority)
   if (hasKeyword(name, keywordRules.strictFccKeywords)) {
-    return { category: "FCC", category_note: "strict-override" };
+    return result("FCC", "strict-override");
   }
 
   if (hasKeyword(name, keywordRules.strictCssKeywords)) {
-    return { category: "CSS", category_note: "strict-override" };
+    return result("CSS", "strict-override");
   }
 
   // 2. Trust already classified data from DB if it's not UNCLASSIFIED
   if (existingCategory === "FCC" || existingCategory === "CSS") {
-    return { 
-      category: existingCategory as Category, 
-      category_note: parseCategoryNote(row["category_note"]) ?? "col-based",
-    };
+    return result(existingCategory as Category, parseCategoryNote(row["category_note"]) ?? "col-based");
   }
 
   const sales3sw = readNumeric(row, ["SALES_3SW", "sales_3sw"]);
@@ -99,22 +192,22 @@ export function determineCategory(row: Record<string, unknown>, rules?: Business
   ]);
 
   if ((sales3sw ?? 0) > 0 && osvNonOsl === null) {
-    return { category: "CSS", category_note: "col-based" };
+    return result("CSS", "col-based");
   }
 
   if ((osvOsl ?? 0) > 0 && osvNonOsl === 0) {
-    return { category: "FCC", category_note: "col-based" };
+    return result("FCC", "col-based");
   }
 
-  const hasFcc = hasKeyword(name, keywordRules.fccKeywords);
+  const hasFcc = hasKeyword(name, keywordRules.fccKeywords) || hasKeyword(name, BUILT_IN_FCC_KEYWORDS);
   const hasCss = hasKeyword(name, keywordRules.cssKeywords);
 
   if (hasFcc && hasCss) {
-    return { category: "UNCLASSIFIED", category_note: "split" };
+    return result("UNCLASSIFIED", "split");
   }
 
-  if (hasFcc) return { category: "FCC", category_note: "keyword-based" };
-  if (hasCss) return { category: "CSS", category_note: "keyword-based" };
+  if (hasFcc) return result("FCC", "keyword-based");
+  if (hasCss) return result("CSS", "keyword-based");
 
-  return { category: "UNCLASSIFIED", category_note: "manual-review" };
+  return result("UNCLASSIFIED", "manual-review");
 }

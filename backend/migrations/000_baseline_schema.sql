@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS public.projects (
     -- patch: add_classification_columns.sql
     category                    TEXT,
     category_note               TEXT,
+    subcategory             TEXT,
     created_at                  TIMESTAMPTZ NOT NULL DEFAULT timezone('utc', now())
 );
 
@@ -79,6 +80,7 @@ CREATE INDEX IF NOT EXISTS idx_projects_batch_number    ON public.projects (batc
 CREATE INDEX IF NOT EXISTS idx_projects_created_at      ON public.projects (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_projects_batch_created_at ON public.projects (batch_number, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_projects_category        ON public.projects (category);
+CREATE INDEX IF NOT EXISTS idx_projects_subcategory ON public.projects (subcategory);
 
 -- ── project_targets (Backlog) ─────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS public.project_targets (
@@ -118,6 +120,7 @@ CREATE TABLE IF NOT EXISTS public.project_targets (
     -- patch: add_category_columns.sql + add_classification_columns.sql
     category                    TEXT,
     category_note               TEXT,
+    subcategory             TEXT,
     -- patch: fix_backlog_status.sql
     status                      TEXT DEFAULT 'On Track',
     created_at                  TIMESTAMPTZ NOT NULL DEFAULT timezone('utc', now())
@@ -132,6 +135,7 @@ CREATE INDEX IF NOT EXISTS idx_project_targets_batch_number     ON public.projec
 CREATE INDEX IF NOT EXISTS idx_project_targets_created_at       ON public.project_targets (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_project_targets_batch_created_at ON public.project_targets (batch_number, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_project_targets_category         ON public.project_targets (category);
+CREATE INDEX IF NOT EXISTS idx_project_targets_subcategory  ON public.project_targets (subcategory);
 
 -- ── prospects ──────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS public.prospects (
@@ -162,6 +166,7 @@ CREATE TABLE IF NOT EXISTS public.prospects (
     -- patch: add_classification_columns.sql
     category                TEXT,
     category_note           TEXT,
+    subcategory         TEXT,
     created_at              TIMESTAMPTZ NOT NULL DEFAULT timezone('utc', now())
 );
 
@@ -177,6 +182,7 @@ CREATE INDEX IF NOT EXISTS idx_prospects_batch_created_at ON public.prospects (b
 CREATE INDEX IF NOT EXISTS idx_prospects_am_name         ON public.prospects (am_name);
 CREATE INDEX IF NOT EXISTS idx_prospects_target_date     ON public.prospects (target_date);
 CREATE INDEX IF NOT EXISTS idx_prospects_category        ON public.prospects (category);
+CREATE INDEX IF NOT EXISTS idx_prospects_subcategory ON public.prospects (subcategory);
 CREATE INDEX IF NOT EXISTS idx_prospects_name_trgm  ON public.prospects USING gin (prospect_name gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_prospects_client_trgm ON public.prospects USING gin (client_name gin_trgm_ops);
 

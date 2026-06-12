@@ -12,10 +12,10 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell
 } from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
-import * as XLSX from "xlsx";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { authenticatedFetchJson } from "@/lib/authenticated-fetch";
+import { exportStyledXlsx } from "@/lib/styled-xlsx-export";
 import type { Database } from "@/lib/database.types";
 
 // --- Types ---
@@ -163,10 +163,7 @@ export default function SalesPerformancePage() {
       'Achievement (%)': item.achievement_percent.toFixed(2)
     }));
 
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "SalesPerformance");
-    XLSX.writeFile(wb, `Sales_Performance_${new Date().toISOString().split('T')[0]}.xlsx`);
+    exportStyledXlsx(exportData, "SalesPerformance", `Sales_Performance_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   const chartData = useMemo(() => {

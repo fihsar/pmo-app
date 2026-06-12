@@ -192,6 +192,7 @@ export type Database = {
           batch_number: number | null
           category: string | null
           category_note: string | null
+          subcategory: string | null
           client_po_date: string | null
           company_name: string | null
           count_target_change: number | null
@@ -230,6 +231,7 @@ export type Database = {
           batch_number?: number | null
           category?: string | null
           category_note?: string | null
+          subcategory?: string | null
           client_po_date?: string | null
           company_name?: string | null
           count_target_change?: number | null
@@ -268,6 +270,7 @@ export type Database = {
           batch_number?: number | null
           category?: string | null
           category_note?: string | null
+          subcategory?: string | null
           client_po_date?: string | null
           company_name?: string | null
           count_target_change?: number | null
@@ -312,6 +315,7 @@ export type Database = {
           budget_usage: number | null
           category: string | null
           category_note: string | null
+          subcategory: string | null
           client_po_date: string | null
           contract_date: string | null
           created_at: string
@@ -374,6 +378,7 @@ export type Database = {
           budget_usage?: number | null
           category?: string | null
           category_note?: string | null
+          subcategory?: string | null
           client_po_date?: string | null
           contract_date?: string | null
           created_at?: string
@@ -436,6 +441,7 @@ export type Database = {
           budget_usage?: number | null
           category?: string | null
           category_note?: string | null
+          subcategory?: string | null
           client_po_date?: string | null
           contract_date?: string | null
           created_at?: string
@@ -499,6 +505,7 @@ export type Database = {
           batch_number: number | null
           category: string | null
           category_note: string | null
+          subcategory: string | null
           client_name: string | null
           company_name: string | null
           confidence_level: number | null
@@ -527,6 +534,7 @@ export type Database = {
           batch_number?: number | null
           category?: string | null
           category_note?: string | null
+          subcategory?: string | null
           client_name?: string | null
           company_name?: string | null
           confidence_level?: number | null
@@ -555,6 +563,7 @@ export type Database = {
           batch_number?: number | null
           category?: string | null
           category_note?: string | null
+          subcategory?: string | null
           client_name?: string | null
           company_name?: string | null
           confidence_level?: number | null

@@ -18,8 +18,10 @@ import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { determineCategory } from "@/lib/classification";
+import { getErrorMessage, isMissingSubcategoryError } from "@/lib/error-message";
 import { projectRowSchema, validateRows } from "@/lib/excel-row-schemas";
 import { parseXlsxInWorker } from "@/lib/use-xlsx-parser";
+import { exportStyledXlsx } from "@/lib/styled-xlsx-export";
 import type { Tables, Database } from "@/lib/database.types";
 
 type Project = Tables<"projects">;
@@ -370,6 +372,7 @@ export default function ProjectsPage() {
           gp_need_invoice_as_june_2020: parseNumeric(row["GP_NEED_INVOICE_AS_JUNE_2020"]),
           category: categoryResult.category,
           category_note: categoryResult.category_note,
+          subcategory: categoryResult.subcategory,
         });
       });
 
@@ -439,7 +442,12 @@ export default function ProjectsPage() {
         }
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to parse Excel file.");
+      const message = getErrorMessage(err);
+      if (isMissingSubcategoryError(message)) {
+        setError(`Failed to save to database. The database is missing the subcategory column. Apply backend/migrations/013_add_subcategory.sql, then retry. Details: ${message}`);
+      } else {
+        setError(message || "Failed to parse Excel file.");
+      }
     } finally {
       setLoading(false);
       e.target.value = ""; // Reset input
@@ -501,14 +509,11 @@ export default function ProjectsPage() {
         'GROSS_PROFIT': p.gross_profit,
         'PERCENTAGE_PROGRESS': p.percentage_progress,
         'CATEGORY': p.category,
+        'SUBCATEGORY': p.subcategory,
         'CATEGORY_NOTE': p.category_note
       }));
 
-      const XLSX = await import("xlsx");
-      const ws = XLSX.utils.json_to_sheet(exportData);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Projects");
-      XLSX.writeFile(wb, `Projects_Export_${new Date().toISOString().split('T')[0]}.xlsx`);
+      exportStyledXlsx(exportData, "Projects", `Projects_Export_${new Date().toISOString().split('T')[0]}.xlsx`);
       setSuccess(`Successfully exported ${data.length} projects!`);
     } catch (err: unknown) {
       setError(`Export failed: ${err instanceof Error ? err.message : String(err)}`);

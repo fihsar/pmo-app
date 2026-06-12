@@ -22,9 +22,8 @@ The **PMO App** is a project management dashboard for PT Q2 Technologies. It tra
    - ✅ **Migration 010**: `project_targets` UPDATE operations are column-scoped via trigger — non-admin roles can only modify the `status` column.
 
 ### 🔧 Partially Complete
-5. **Schema and migration cleanup** — Migrations 000–010 are ordered and applied. Two items remain:
-   - Loose SQL patch files in `backend/` (`add_batch_columns.sql`, etc.) still coexist alongside the migrations folder and should be archived.
-   - `database.types.ts` is stale — does not include `audit_log`, `business_rules`, `am_master`, `pm_master`, or `category_targets`. Needs regeneration via `supabase gen types typescript`.
+5. **Schema and migration cleanup** — Migrations 000–011 are ordered and applied. One item remains:
+   - Loose SQL patch files in `backend/` (`add_batch_columns.sql`, etc.) still coexist alongside the migrations folder and should be archived or deleted.
 
 ---
 
@@ -35,7 +34,7 @@ The application is built around a high-performance "Zero-Row" architecture.
 - **Centralized Batch Metadata:** A `batch_metadata` table tracks the latest upload version for all data types, kept in sync via statement-level database triggers. Provides O(1) version lookups via `get_latest_batch()`.
 - **Server-Side Aggregations:** Backlog and Prospects pages use dedicated RPCs (`get_backlog_subtotals`, `get_prospects_subtotals`) to compute global financial sums across the entire filtered dataset.
 - **Search Debouncing:** A 500ms debounce is applied to all text searches.
-- **Latency Monitoring (Partial):** Query latency logs are implemented on Projects, Prospects, Backlog, and Sales Performance pages. Dashboard page fetches do not currently log latency in the same pattern.
+- **Latency Monitoring:** Query latency logs are implemented on all pages (Dashboard, Projects, Prospects, Backlog, Sales Performance) using `performance.now()` before/after each RPC call.
 
 ---
 
@@ -146,7 +145,7 @@ Standardized `go.mod` at the root ensures consistent dependency management.
 - **Binary Exclusion**: Workbook files (`.xlsx`) are strictly ignored via `.gitignore`.
 - **Shared Parsing Utilities**: Excel parsing helpers (`parseDate`, `parseNumeric`, `parseText`, `formatDate`) are centralized in `frontend/lib/excel-utils.ts` and reused by Backlog and Prospects.
 - **Deployment Safety**: `npm run build` passes cleanly.
-- **Known Type Gap**: `audit_log` and `business_rules` tables are not yet in the generated `database.types.ts`. The server files that access them cast the admin client to `any` as a workaround. Regenerating types from Supabase will fix this.
+- **Type Safety:** `database.types.ts` is fully regenerated and includes all tables (`audit_log`, `business_rules`, `am_master`, `pm_master`, `category_targets`). No `as any` casts remain on the admin client.
 
 ---
 
@@ -164,10 +163,6 @@ Standardized `go.mod` at the root ensures consistent dependency management.
 ---
 
 ## 10. Known Gaps and Pending Work
-- **`database.types.ts` is stale**: Does not include `audit_log`, `business_rules`, `am_master`, `pm_master`, or `category_targets`. Regenerate with `supabase gen types typescript`.
-- **Latency logging on Dashboard**: The `get_dashboard_summary()` RPC call does not log latency. Should follow the same pattern as other pages.
-- **`local-json-store.server.ts`**: Dead code — business rules and audit log now use Supabase. The file and `frontend/data/*.json` can be removed.
-- **`defaultBusinessRules` fallback**: `business-rules.shared.ts` still has full hardcoded AM/PM/keyword lists as defaults. If the DB is empty or the API fails, the app silently uses stale data. Defaults should be empty arrays with a clear "not configured" UI state.
 - **"Forgot?" button on login page**: Renders but has no handler. Wire to `supabase.auth.resetPasswordForEmail()` or remove.
 - **Upload audit events are fire-and-forget**: `void authenticatedFetch("/api/audit-log", ...)` in upload handlers silently swallows failures. Should at minimum log errors to console.
 - **Loose SQL patch files in `backend/`**: `add_batch_columns.sql`, `add_category_columns.sql`, etc. coexist alongside the `migrations/` folder. Should be archived or deleted to avoid confusion about what's deployed.

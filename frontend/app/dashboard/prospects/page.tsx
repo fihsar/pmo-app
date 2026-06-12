@@ -18,9 +18,11 @@ import { defaultBusinessRules, type BusinessRules } from "@/lib/business-rules.s
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { formatDate, parseDate, parseNumeric, parseText } from "@/lib/excel-utils";
 import { cn } from "@/lib/utils";
-import { determineCategory } from "@/lib/classification";
+import { determineCategory, determineSubcategory, type Category } from "@/lib/classification";
 import { prospectRowSchema, validateRows } from "@/lib/excel-row-schemas";
+import { getErrorMessage, isMissingSubcategoryError } from "@/lib/error-message";
 import { parseXlsxInWorker } from "@/lib/use-xlsx-parser";
+import { exportStyledXlsx } from "@/lib/styled-xlsx-export";
 import type { Tables, Database } from "@/lib/database.types";
 import { BusinessRulesNotConfigured } from "@/components/business-rules-not-configured";
 import { useAuthSession } from "@/components/auth-session-provider";
@@ -28,6 +30,23 @@ import { useAuthSession } from "@/components/auth-session-provider";
 type Prospect = Tables<"prospects">;
 
 const normalizeAMKey = (value: string) => value.trim().toLowerCase();
+
+const normalizeExcelKey = (key: string) => key.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+const readExcelCell = (row: Record<string, unknown>, keys: string[]) => {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(row, key)) return row[key];
+  }
+
+  const entries = Object.entries(row).map(([key, value]) => [normalizeExcelKey(key), value] as const);
+  for (const key of keys) {
+    const normalizedKey = normalizeExcelKey(key);
+    const match = entries.find(([rowKey]) => rowKey === normalizedKey);
+    if (match) return match[1];
+  }
+
+  return null;
+};
 
 const cssNameFallbackPatterns = [
   "%Managed Service%",
@@ -335,8 +354,8 @@ export default function ProspectsPage() {
       // AM validation is now non-blocking as per user request.
       // We still track unknown AMs for potential logging/debugging but we don't throw.
       const unknownAMs = Array.from(new Set(
-        json
-          .map((row) => parseText(row["AM_NAME"]))
+        normalizedJson
+          .map((row) => parseText(readExcelCell(row, ["AM_NAME"])))
           .filter((rawName): rawName is string => {
             if (!rawName) return false;
             return !allowedAMMap.has(normalizeAMKey(rawName));
@@ -347,33 +366,34 @@ export default function ProspectsPage() {
         console.warn(`Uploading with ${unknownAMs.length} unrecognized AM names:`, unknownAMs);
       }
 
-      const newProspects: Database["public"]["Tables"]["prospects"]["Insert"][] = json.map((row) => {
+      const newProspects: Database["public"]["Tables"]["prospects"]["Insert"][] = normalizedJson.map((row) => {
         const categoryResult = determineCategory(row, businessRules);
-        const canonicalAMName = toCanonicalAM(parseText(row["AM_NAME"]));
+        const canonicalAMName = toCanonicalAM(parseText(readExcelCell(row, ["AM_NAME"])));
         return {
-        id_top_sales: parseNumeric(row["ID_TOP_SALES"]),
-        am_name: canonicalAMName,
-        company_name: parseText(row["COMPANY_NAME"]),
-        directorat: parseText(row["DIRECTORAT"]),
-        group_name: parseText(row["GROUP_NAME"]),
-        id_project: parseText(row["ID_PROJECT"]),
-        id_prospect_status: parseNumeric(row["ID_PROSPECT_STATUS"]),
-        prospect_name: parseText(row["PROSPECT_NAME"]),
-        client_name: parseText(row["CLIENT_NAME"]),
-        status: parseText(row["STATUS"]),
-        term_of_payment: parseText(row["TERM_OF_PAYMENT"]),
-        amount: parseNumeric(row[" AMOUNT "] ?? row["AMOUNT"]),
-        gp: parseNumeric(row[" GP "] ?? row["GP"]),
-        amount_cl: parseNumeric(row[" AMOUNT_CL "] ?? row["AMOUNT_CL"]),
-        gp_cl: parseNumeric(row[" GP_CL "] ?? row["GP_CL"]),
-        est_prospect_close_date: parseDate(row["EST_PROSPECT_CLOSE_DATE"]),
-        target_date: parseDate(row["TARGET_DATE"]),
-        confidence_level: parseNumeric(row["CONFIDENCE_LEVEL"]),
-        osv_non_osl: parseNumeric(row["OSV - Non OSL"]),
-        opr_del: parseNumeric(row["OPR&DEL"]),
-        category: categoryResult.category,
-        category_note: categoryResult.category_note,
-      };
+          id_top_sales: parseNumeric(readExcelCell(row, ["ID_TOP_SALES"])),
+          am_name: canonicalAMName,
+          company_name: parseText(readExcelCell(row, ["COMPANY_NAME"])),
+          directorat: parseText(readExcelCell(row, ["DIRECTORAT"])),
+          group_name: parseText(readExcelCell(row, ["GROUP_NAME"])),
+          id_project: parseText(readExcelCell(row, ["ID_PROJECT"])),
+          id_prospect_status: parseNumeric(readExcelCell(row, ["ID_PROSPECT_STATUS"])),
+          prospect_name: parseText(readExcelCell(row, ["PROSPECT_NAME"])),
+          client_name: parseText(readExcelCell(row, ["CLIENT_NAME"])),
+          status: parseText(readExcelCell(row, ["STATUS"])),
+          term_of_payment: parseText(readExcelCell(row, ["TERM_OF_PAYMENT"])),
+          amount: parseNumeric(readExcelCell(row, ["AMOUNT"])),
+          gp: parseNumeric(readExcelCell(row, ["GP"])),
+          amount_cl: parseNumeric(readExcelCell(row, ["AMOUNT_CL"])),
+          gp_cl: parseNumeric(readExcelCell(row, ["GP_CL"])),
+          est_prospect_close_date: parseDate(readExcelCell(row, ["EST_PROSPECT_CLOSE_DATE"])),
+          target_date: parseDate(readExcelCell(row, ["TARGET_DATE"])),
+          confidence_level: parseNumeric(readExcelCell(row, ["CONFIDENCE_LEVEL"])),
+          osv_non_osl: parseNumeric(readExcelCell(row, ["OSV_NON_OSL", "OSV - NON OSL", "OSV - Non OSL"])),
+          opr_del: parseNumeric(readExcelCell(row, ["OPR_DEL", "OPR&DEL"])),
+          category: categoryResult.category,
+          category_note: categoryResult.category_note,
+          subcategory: categoryResult.subcategory,
+        };
       });
 
       if (!isSupabaseConfigured) {
@@ -427,7 +447,12 @@ export default function ProspectsPage() {
       await loadProspects();
     } catch (err: unknown) {
       console.error(err);
-      setError(`Failed to save to database. If needed, run backend/add_batch_columns.sql to add missing fields. Details: ${err instanceof Error ? err.message : String(err)}`);
+      const message = getErrorMessage(err);
+      if (isMissingSubcategoryError(message)) {
+        setError(`Failed to save to database. The database is missing the subcategory column. Apply backend/migrations/013_add_subcategory.sql, then retry. Details: ${message}`);
+      } else {
+        setError(`Failed to save to database. Details: ${message}`);
+      }
     } finally {
       setLoading(false);
       e.target.value = '';
@@ -450,7 +475,7 @@ export default function ProspectsPage() {
 
       let query = supabase
         .from("prospects")
-        .select("prospect_name, am_name, company_name, id_project, amount, gp, status, confidence_level, est_prospect_close_date, target_date, category, category_note")
+        .select("id_top_sales, am_name, company_name, directorat, group_name, id_project, id_prospect_status, prospect_name, client_name, status, term_of_payment, amount, gp, amount_cl, gp_cl, est_prospect_close_date, target_date, confidence_level, osv_non_osl, opr_del, category, subcategory, category_note")
         .eq("batch_number", maxBatch)
         .in("am_name", allowedAMs);
 
@@ -498,26 +523,36 @@ export default function ProspectsPage() {
         return;
       }
 
-      const exportData = data.map(p => ({
-        'PROSPECT_NAME': p.prospect_name,
-        'AM_NAME': p.am_name,
-        'COMPANY_NAME': p.company_name,
-        'ID_PROJECT': p.id_project,
-        'AMOUNT': p.amount,
-        'GP': p.gp,
-        'STATUS': p.status,
-        'CONFIDENCE_LEVEL': p.confidence_level,
-        'EST_PROSPECT_CLOSE_DATE': p.est_prospect_close_date,
-        'TARGET_DATE': p.target_date,
-        'CATEGORY': p.category,
-        'CATEGORY_NOTE': p.category_note
-      }));
+      const exportData = data.map(p => {
+        const sourceRow = {
+          PROSPECT_NAME: p.prospect_name,
+          STATUS: p.status,
+          category: p.category,
+          category_note: p.category_note,
+        };
+        const fallbackCategory = determineCategory(sourceRow, businessRules).category;
+        const category = (p.category || fallbackCategory) as Category;
+        const subcategory = p.subcategory ?? determineSubcategory(sourceRow, category);
 
-      const XLSX = await import("xlsx");
-      const ws = XLSX.utils.json_to_sheet(exportData);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Prospects");
-      XLSX.writeFile(wb, `Prospects_Export_${new Date().toISOString().split('T')[0]}.xlsx`);
+        return {
+          'AM_NAME': p.am_name,
+          'ID_PROJECT': p.id_project,
+          'PROSPECT_NAME': p.prospect_name,
+          'CLIENT_NAME': p.client_name,
+          'STATUS': p.status,
+          'TERM_OF_PAYMENT': p.term_of_payment,
+          'AMOUNT': p.amount,
+          'GP': p.gp,
+          'EST_PROSPECT_CLOSE_DATE': p.est_prospect_close_date,
+          'TARGET_DATE': p.target_date,
+          'CONFIDENCE_LEVEL': p.confidence_level,
+          'OPR_DEL': p.opr_del,
+          'CATEGORY': category,
+          'SUBCATEGORY': subcategory
+        };
+      });
+
+      exportStyledXlsx(exportData, "Prospects", `Prospects_Export_${new Date().toISOString().split('T')[0]}.xlsx`);
       setSuccess(`Successfully exported ${data.length} prospects!`);
     } catch (err: unknown) {
       setError(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
