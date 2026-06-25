@@ -90,16 +90,9 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## Backend notes
 
-The `backend/` directory contains SQL files and Go utilities used to prepare database objects and run supporting services.
+The `backend/` directory contains Go utilities and an ordered set of SQL migrations used to prepare database objects and run supporting services.
 
-Important files include:
-
-- `backend/dashboard_summary.sql`
-- `backend/projects_schema.sql`
-- `backend/prospects_schema.sql`
-- `backend/project_targets_schema.sql`
-- `backend/add_batch_columns.sql`
-- `backend/add_category_columns.sql`
+Database schema and RPC changes are tracked in `backend/migrations/` (000 through 013). Apply them in order to a fresh Supabase project to reproduce the full schema.
 
 If you use the Go backend locally, make sure `DATABASE_URL` is set in your environment or local `.env` file before running it.
 
