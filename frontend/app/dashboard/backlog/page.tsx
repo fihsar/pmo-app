@@ -5,9 +5,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { 
-  ArrowUpDown, ArrowUp, ArrowDown, Search, ChevronLeft, 
-  ChevronRight, ChevronsLeft, ChevronsRight, Upload, Download, Inbox 
+import {
+  ArrowUpDown, ArrowUp, ArrowDown, Search, ChevronLeft,
+  ChevronRight, ChevronsLeft, ChevronsRight, Upload, Download, Inbox, Trash2
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import * as XLSX from "xlsx";
@@ -18,6 +18,11 @@ import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { formatDate, parseDate, parseNumeric, parseText } from "@/lib/excel-utils";
 import { cn } from "@/lib/utils";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { useAuthSession } from "@/components/auth-session-provider";
 import { determineCategory } from "@/lib/classification";
 import { getErrorMessage, isMissingSubcategoryError } from "@/lib/error-message";
 import { exportStyledXlsx } from "@/lib/styled-xlsx-export";
@@ -64,9 +69,17 @@ export default function ProjectTargetPage() {
   const [invoiceDateEmpty, setInvoiceDateEmpty] = useState(false);
   const [sortConfig, setSortConfig] = useState<{ key: keyof ProjectTarget; direction: "asc" | "desc" } | null>({ key: "target_date", direction: "asc" });
   
+  const [targetToDelete, setTargetToDelete] = useState<ProjectTarget | null>(null);
+  const [editingDateId, setEditingDateId] = useState<string | null>(null);
+  const [editingDateValue, setEditingDateValue] = useState<string>("");
+
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+
+  const { role } = useAuthSession();
+  const isSuperadmin = role === "Superadmin";
+  const canEditDate = role === "Superadmin" || role === "Project Administrator";
 
   // Debounce search query
   useEffect(() => {
@@ -530,11 +543,44 @@ export default function ProjectTargetPage() {
     }
   };
 
+  const commitDateEdit = async (id: string, newDate: string) => {
+    setEditingDateId(null);
+    if (!isSupabaseConfigured) return;
+    setTargets(prev => prev.map(t => t.id === id ? { ...t, target_date: newDate || null } : t));
+    const { error } = await supabase.from("project_targets").update({ target_date: newDate || null }).eq("id", id);
+    if (error) {
+      console.error("Failed to update target date:", error.message);
+      void loadTargets();
+    }
+  };
+
   const updateStatus = async (id: string | undefined, newStatus: string) => {
     if (!id || !isSupabaseConfigured) return;
     setTargets(prev => prev.map(t => t.id === id ? { ...t, status: newStatus } : t));
     const { error } = await supabase.from("project_targets").update({ status: newStatus }).eq("id", id);
     if (error) console.error("Failed to update status:", error.message);
+  };
+
+  const handleDelete = async (target: ProjectTarget) => {
+    if (!target.id || !isSupabaseConfigured) return;
+    const { error: deleteError } = await supabase.from("project_targets").delete().eq("id", target.id);
+    if (deleteError) {
+      setError(`Failed to delete row: ${deleteError.message}`);
+      return;
+    }
+    setTargets(prev => prev.filter(t => t.id !== target.id));
+    setTotalTargetsCount(prev => prev - 1);
+    void authenticatedFetch("/api/audit-log", {
+      method: "POST",
+      body: JSON.stringify({
+        type: "delete",
+        action: "deleted",
+        targetType: "project_target",
+        targetLabel: target.project_name || target.project_id || target.id,
+        metadata: { id: target.id, project_id: target.project_id, project_name: target.project_name },
+      }),
+    });
+    void loadTargets();
   };
 
   const handleSort = (key: keyof ProjectTarget) => {
@@ -730,13 +776,14 @@ export default function ProjectTargetPage() {
                   {renderSortableHeader("Target Date", "target_date")}
                   {renderSortableHeader("Category", "category", undefined, "center")}
                   {renderSortableHeader("Status", "status", undefined, "center")}
+                  {isSuperadmin && <th className="py-2 w-8" />}
                 </tr>
               </thead>
               <tbody>
                 {loading && targets.length === 0 ? (
                   Array.from({ length: 10 }).map((_, i) => (
                     <tr key={i} className="border-b last:border-0">
-                      {Array.from({ length: 11 }).map((_, j) => (
+                      {Array.from({ length: isSuperadmin ? 12 : 11 }).map((_, j) => (
                         <td key={j} className="py-4 pr-3">
                           <Skeleton className="h-4 w-full" />
                         </td>
@@ -745,7 +792,7 @@ export default function ProjectTargetPage() {
                   ))
                 ) : targets.length === 0 ? (
                   <tr>
-                    <td className="py-24 text-center text-muted-foreground" colSpan={11}>
+                    <td className="py-24 text-center text-muted-foreground" colSpan={isSuperadmin ? 12 : 11}>
                       <div className="flex flex-col items-center justify-center gap-3">
                         <div className="rounded-full bg-muted p-4">
                           <Inbox className="h-8 w-8 text-muted-foreground/40" />
@@ -759,7 +806,7 @@ export default function ProjectTargetPage() {
                   </tr>
                 ) : totalTargetsCount === 0 ? (
                   <tr>
-                    <td className="py-24 text-center text-muted-foreground" colSpan={11}>
+                    <td className="py-24 text-center text-muted-foreground" colSpan={isSuperadmin ? 12 : 11}>
                       <div className="flex flex-col items-center justify-center gap-3">
                         <div className="rounded-full bg-muted p-4">
                           <Search className="h-8 w-8 text-muted-foreground/40" />
@@ -787,7 +834,34 @@ export default function ProjectTargetPage() {
                         <td className="py-2 pr-3 font-medium text-foreground">
                           {target.gp_acc != null ? `Rp ${target.gp_acc.toLocaleString('id-ID', { maximumFractionDigits: 0 })}` : "-"}
                         </td>
-                        <td className="py-2 pr-3 text-muted-foreground">{formatDate(target.target_date)}</td>
+                        <td className="py-2 pr-3 text-muted-foreground">
+                          {canEditDate && editingDateId === target.id ? (
+                            <input
+                              type="date"
+                              autoFocus
+                              className="h-7 w-[125px] rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                              value={editingDateValue}
+                              onChange={(e) => setEditingDateValue(e.target.value)}
+                              onBlur={() => void commitDateEdit(target.id!, editingDateValue)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") void commitDateEdit(target.id!, editingDateValue);
+                                if (e.key === "Escape") setEditingDateId(null);
+                              }}
+                            />
+                          ) : (
+                            <span
+                              onClick={() => {
+                                if (!canEditDate) return;
+                                setEditingDateId(target.id!);
+                                setEditingDateValue(target.target_date ?? "");
+                              }}
+                              className={cn(canEditDate && "cursor-pointer hover:text-foreground hover:underline underline-offset-2 decoration-dashed")}
+                              title={canEditDate ? "Click to edit" : undefined}
+                            >
+                              {formatDate(target.target_date) || "—"}
+                            </span>
+                          )}
+                        </td>
                         <td className="py-2 text-center">
                           <div className="flex justify-center">
                             <span className={cn(
@@ -802,19 +876,21 @@ export default function ProjectTargetPage() {
                         </td>
                         <td className="py-2 text-center">
                           <div className="flex justify-center">
-                            <Select 
-                              value={target.status || "On Track"} 
+                            <Select
+                              value={target.status || "On Track"}
                               onValueChange={(val) => updateStatus(target.id, val)}
                             >
                               <SelectTrigger className={cn(
                                 "!h-auto !py-0.5 !px-2 !rounded-full !justify-center text-[10px] font-medium border shadow-none w-fit whitespace-nowrap focus:ring-0 focus:ring-offset-0 hover:opacity-80 transition-opacity [&>svg]:hidden",
                                 (!target.status || target.status === "On Track") && "bg-green-100 text-green-700 border-green-200",
+                                target.status === "Ahead" && "bg-sky-100 text-sky-700 border-sky-200",
                                 target.status === "At Risk" && "bg-amber-100 text-amber-700 border-amber-200",
                                 target.status === "Delayed" && "bg-red-100 text-red-700 border-red-200"
                               )}>
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
+                                <SelectItem value="Ahead" className="text-sky-600 font-medium text-xs">Ahead</SelectItem>
                                 <SelectItem value="On Track" className="text-green-600 font-medium text-xs">On Track</SelectItem>
                                 <SelectItem value="At Risk" className="text-amber-600 font-medium text-xs">At Risk</SelectItem>
                                 <SelectItem value="Delayed" className="text-red-600 font-medium text-xs">Delayed</SelectItem>
@@ -822,6 +898,17 @@ export default function ProjectTargetPage() {
                             </Select>
                           </div>
                         </td>
+                        {isSuperadmin && (
+                          <td className="py-2 text-center">
+                            <button
+                              onClick={() => setTargetToDelete(target)}
+                              className="p-1 rounded text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10 transition-colors"
+                              title="Delete row"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     );
                   })
@@ -840,6 +927,7 @@ export default function ProjectTargetPage() {
                     <td className="py-3 pr-3"></td>
                     <td className="py-3 pr-3"></td>
                     <td className="py-3 pr-3"></td>
+                    {isSuperadmin && <td className="py-3 pr-3"></td>}
                   </tr>
                 </tfoot>
               )}
@@ -914,6 +1002,23 @@ export default function ProjectTargetPage() {
           )}
         </CardContent>
       </Card>
+
+      <AlertDialog open={targetToDelete !== null} onOpenChange={(open) => { if (!open) setTargetToDelete(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this row?</AlertDialogTitle>
+            <AlertDialogDescription>
+              <span className="font-medium text-foreground">{targetToDelete?.project_name || targetToDelete?.project_id || "This row"}</span> will be permanently removed from the backlog. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { if (targetToDelete) { void handleDelete(targetToDelete); setTargetToDelete(null); } }}>
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
