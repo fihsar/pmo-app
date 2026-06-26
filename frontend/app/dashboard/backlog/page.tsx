@@ -400,7 +400,7 @@ export default function ProjectTargetPage() {
       const newTargetsWithBatch = newTargets.map(target => ({
         ...target,
         batch_number: nextBatch,
-        status: "On Track"
+        status: "ON TRACK"
       }));
 
       const chunkSize = 100;
@@ -530,7 +530,7 @@ export default function ProjectTargetPage() {
         'TARGET_DATE': t.target_date,
         'CATEGORY': t.category,
         'SUBCATEGORY': t.subcategory,
-        'STATUS': t.status || 'On Track'
+        'STATUS': t.status || 'ON TRACK'
       }));
 
       exportStyledXlsx(exportData, "Backlog", `Backlog_Export_${new Date().toISOString().split('T')[0]}.xlsx`);
@@ -877,23 +877,23 @@ export default function ProjectTargetPage() {
                         <td className="py-2 text-center">
                           <div className="flex justify-center">
                             <Select
-                              value={target.status || "On Track"}
+                              value={target.status || "ON TRACK"}
                               onValueChange={(val) => updateStatus(target.id, val)}
                             >
                               <SelectTrigger className={cn(
                                 "!h-auto !py-0.5 !px-2 !rounded-full !justify-center text-[10px] font-medium border shadow-none w-fit whitespace-nowrap focus:ring-0 focus:ring-offset-0 hover:opacity-80 transition-opacity [&>svg]:hidden",
-                                (!target.status || target.status === "On Track") && "bg-green-100 text-green-700 border-green-200",
-                                target.status === "Ahead" && "bg-sky-100 text-sky-700 border-sky-200",
-                                target.status === "At Risk" && "bg-amber-100 text-amber-700 border-amber-200",
-                                target.status === "Delayed" && "bg-red-100 text-red-700 border-red-200"
+                                (!target.status || target.status === "ON TRACK") && "bg-green-100 text-green-700 border-green-200",
+                                target.status === "AHEAD" && "bg-sky-100 text-sky-700 border-sky-200",
+                                target.status === "AT RISK" && "bg-amber-100 text-amber-700 border-amber-200",
+                                target.status === "DELAYED" && "bg-red-100 text-red-700 border-red-200"
                               )}>
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="Ahead" className="text-sky-600 font-medium text-xs">Ahead</SelectItem>
-                                <SelectItem value="On Track" className="text-green-600 font-medium text-xs">On Track</SelectItem>
-                                <SelectItem value="At Risk" className="text-amber-600 font-medium text-xs">At Risk</SelectItem>
-                                <SelectItem value="Delayed" className="text-red-600 font-medium text-xs">Delayed</SelectItem>
+                                <SelectItem value="AHEAD" className="text-sky-600 font-medium text-xs">AHEAD</SelectItem>
+                                <SelectItem value="ON TRACK" className="text-green-600 font-medium text-xs">ON TRACK</SelectItem>
+                                <SelectItem value="AT RISK" className="text-amber-600 font-medium text-xs">AT RISK</SelectItem>
+                                <SelectItem value="DELAYED" className="text-red-600 font-medium text-xs">DELAYED</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
