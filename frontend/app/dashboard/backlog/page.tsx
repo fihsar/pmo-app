@@ -883,14 +883,14 @@ export default function ProjectTargetPage() {
                               <SelectTrigger className={cn(
                                 "!h-auto !py-0.5 !px-2 !rounded-full !justify-center text-[10px] font-medium border shadow-none w-fit whitespace-nowrap focus:ring-0 focus:ring-offset-0 hover:opacity-80 transition-opacity [&>svg]:hidden",
                                 (!target.status || target.status === "ON TRACK") && "bg-green-100 text-green-700 border-green-200",
-                                target.status === "AHEAD" && "bg-sky-100 text-sky-700 border-sky-200",
+                                target.status === "EARLY" && "bg-sky-100 text-sky-700 border-sky-200",
                                 target.status === "AT RISK" && "bg-amber-100 text-amber-700 border-amber-200",
                                 target.status === "DELAYED" && "bg-red-100 text-red-700 border-red-200"
                               )}>
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="AHEAD" className="text-sky-600 font-medium text-xs">AHEAD</SelectItem>
+                                <SelectItem value="EARLY" className="text-sky-600 font-medium text-xs">EARLY</SelectItem>
                                 <SelectItem value="ON TRACK" className="text-green-600 font-medium text-xs">ON TRACK</SelectItem>
                                 <SelectItem value="AT RISK" className="text-amber-600 font-medium text-xs">AT RISK</SelectItem>
                                 <SelectItem value="DELAYED" className="text-red-600 font-medium text-xs">DELAYED</SelectItem>
