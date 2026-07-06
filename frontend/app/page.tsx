@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import { useAuthSession } from "@/components/auth-session-provider";
+import { useAuthSession } from "@/hooks/use-auth-session";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
   LayoutDashboard,
@@ -157,7 +157,28 @@ export default function App() {
                 <div className="flex items-center justify-between">
                   <Label htmlFor="password" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Password</Label>
                   {!isRegister && (
-                    <button type="button" className="text-[10px] font-bold uppercase tracking-tighter text-primary transition-colors hover:opacity-80">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const cleanEmail = email.trim().toLowerCase();
+                        if (!cleanEmail) {
+                          setErrorMsg("Please enter your email address first.");
+                          return;
+                        }
+                        setErrorMsg("");
+                        setSuccessMsg("");
+                        const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+                          redirectTo: `${window.location.origin}/dashboard`,
+                        });
+                        if (error) {
+                          setErrorMsg(error.message);
+                        } else {
+                          setSuccessMsg("Password reset link sent! Please check your email.");
+                        }
+                      }}
+                      disabled={loading}
+                      className="text-[10px] font-bold uppercase tracking-tighter text-primary transition-colors hover:opacity-80"
+                    >
                       Forgot?
                     </button>
                   )}

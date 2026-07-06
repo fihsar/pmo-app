@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useAuthSession } from "@/components/auth-session-provider";
+import { useAuthSession } from "@/hooks/use-auth-session";
 import { authenticatedFetchJson } from "@/lib/authenticated-fetch";
 import type { SalesTargets, AmTarget, CategoryTarget } from "@/lib/sales-targets.shared";
 

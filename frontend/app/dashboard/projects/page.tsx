@@ -431,7 +431,7 @@ export default function ProjectsPage() {
               warnings: [],
             },
           }),
-        });
+        }).catch((err) => console.error("Audit log error:", err));
 
         await loadProjects();
       } else {

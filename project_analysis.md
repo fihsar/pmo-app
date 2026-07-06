@@ -5,7 +5,7 @@ The **PMO App** is a project management dashboard for PT Q2 Technologies. It tra
 
 ### Tech Stack
 - **Frontend:** Next.js 14 (App Router), TypeScript, Tailwind CSS, Shadcn/UI, Recharts.
-- **Backend (API/Tools):** Go 1.21+ (organized into `cmd/` binaries for ingestion and summary tools).
+- **Backend (API/Tools):** Next.js API Routes (`frontend/app/api/`) and PostgreSQL stored procedures / statement-level triggers (`backend/migrations/`).
 - **Database:** Supabase (PostgreSQL) with advanced SQL RPCs and triggers.
 - **Security:** Supabase Auth + Granular Role-Based Access Control (RBAC).
 
@@ -20,10 +20,10 @@ The **PMO App** is a project management dashboard for PT Q2 Technologies. It tra
 4. **Security and RLS hardening** — Role-based RLS policies are in place (migration 005). Additional hardening completed:
    - ✅ **Migration 009**: `get_prospects_subtotals` now joins `am_master` internally instead of accepting client-provided AM lists.
    - ✅ **Migration 010**: `project_targets` UPDATE operations are column-scoped via trigger — non-admin roles can only modify the `status` column.
+5. **Schema and migration cleanup** — Migrations 000–013 are ordered and applied. Loose SQL patch files in `backend/` have been removed, standardizing on the canonical `backend/migrations/` directory.
 
 ### 🔧 Partially Complete
-5. **Schema and migration cleanup** — Migrations 000–011 are ordered and applied. One item remains:
-   - Loose SQL patch files in `backend/` (`add_batch_columns.sql`, etc.) still coexist alongside the migrations folder and should be archived or deleted.
+*No partially complete core architectural milestones remaining.*
 
 ---
 
@@ -58,14 +58,11 @@ The application is built around a high-performance "Zero-Row" architecture.
 
 ---
 
-## 5. Backend Reorganization
-The Go backend is structured to resolve "multiple main() entrypoints" conflicts:
-- **`cmd/api`**: Main Go API entry point.
-- **`cmd/setup-db`**: Database initialization and schema sync.
-- **`cmd/dashboard-summary`**: Offline summary generation (if needed).
-- **`cmd/prospects-schema`**: Specific schema management tool.
-
-Standardized `go.mod` at the root ensures consistent dependency management.
+## 5. Backend Architecture & API Structure
+The backend is structured around serverless API endpoints and PostgreSQL database migrations, having transitioned away from a legacy Go prototype:
+- **`frontend/app/api/`**: Next.js API Routes providing REST endpoints for business rules, sales targets, portfolio insights, user management, and audit logging.
+- **`backend/migrations/`**: Canonical database migrations (000–013) managing schema DDL, RLS policies, statement-level triggers, and stored procedures (RPCs).
+- **`lib/authenticated-fetch.ts`**: Unified client-side communication utility that attaches Supabase auth tokens to API requests.
 
 ---
 
@@ -163,6 +160,8 @@ Standardized `go.mod` at the root ensures consistent dependency management.
 ---
 
 ## 10. Known Gaps and Pending Work
-- **"Forgot?" button on login page**: Renders but has no handler. Wire to `supabase.auth.resetPasswordForEmail()` or remove.
-- **Upload audit events are fire-and-forget**: `void authenticatedFetch("/api/audit-log", ...)` in upload handlers silently swallows failures. Should at minimum log errors to console.
-- **Loose SQL patch files in `backend/`**: `add_batch_columns.sql`, `add_category_columns.sql`, etc. coexist alongside the `migrations/` folder. Should be archived or deleted to avoid confusion about what's deployed.
+- ✅ **"Forgot?" button on login page**: Wired to `supabase.auth.resetPasswordForEmail()` with user-facing success and error notifications.
+- ✅ **Upload audit event error handling**: Added `.catch()` logging to `authenticatedFetch("/api/audit-log", ...)` across all upload handlers.
+- ✅ **Loose SQL patch files in `backend/`**: Cleaned up residual patch files and duplicate migration folders, standardizing on `backend/migrations/` (000–013).
+- ✅ **Custom hooks architecture**: Standardized frontend hook imports into `@/hooks/` (`use-auth-session.ts`, `use-theme.ts`, `use-sidebar.ts`).
+

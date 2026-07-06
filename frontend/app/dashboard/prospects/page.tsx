@@ -25,7 +25,7 @@ import { parseXlsxInWorker } from "@/lib/use-xlsx-parser";
 import { exportStyledXlsx } from "@/lib/styled-xlsx-export";
 import type { Tables, Database } from "@/lib/database.types";
 import { BusinessRulesNotConfigured } from "@/components/business-rules-not-configured";
-import { useAuthSession } from "@/components/auth-session-provider";
+import { useAuthSession } from "@/hooks/use-auth-session";
 
 type Prospect = Tables<"prospects">;
 
@@ -442,7 +442,7 @@ export default function ProspectsPage() {
             warnings: unknownAMs,
           },
         }),
-      });
+      }).catch((err) => console.error("Audit log error:", err));
 
       await loadProspects();
     } catch (err: unknown) {

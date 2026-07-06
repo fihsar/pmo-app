@@ -19,7 +19,7 @@ import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { Database, Tables } from "@/lib/database.types";
 import { BusinessRulesNotConfigured } from "@/components/business-rules-not-configured";
-import { useAuthSession } from "@/components/auth-session-provider";
+import { useAuthSession } from "@/hooks/use-auth-session";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Project = Pick<Tables<"projects">,

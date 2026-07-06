@@ -22,7 +22,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { useAuthSession } from "@/components/auth-session-provider";
+import { useAuthSession } from "@/hooks/use-auth-session";
 import { determineCategory } from "@/lib/classification";
 import { getErrorMessage, isMissingSubcategoryError } from "@/lib/error-message";
 import { exportStyledXlsx } from "@/lib/styled-xlsx-export";
@@ -427,7 +427,7 @@ export default function ProjectTargetPage() {
             warnings: [],
           },
         }),
-      });
+      }).catch((err) => console.error("Audit log error:", err));
 
       await loadTargets();
     } catch (err: unknown) {
@@ -579,7 +579,7 @@ export default function ProjectTargetPage() {
         targetLabel: target.project_name || target.project_id || target.id,
         metadata: { id: target.id, project_id: target.project_id, project_name: target.project_name },
       }),
-    });
+    }).catch((err) => console.error("Audit log error:", err));
     void loadTargets();
   };
 

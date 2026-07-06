@@ -22,7 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import { useAuthSession } from "@/components/auth-session-provider";
+import { useAuthSession } from "@/hooks/use-auth-session";
 import { ShieldAlert } from "lucide-react";
 import type { Tables } from "@/lib/database.types";
 

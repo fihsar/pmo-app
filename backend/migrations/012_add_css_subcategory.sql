@@ -1,4 +1,4 @@
--- Migration 012: Add subcategory classification across Projects, Prospects, and Backlog.
+-- Migration 012: Add CSS subcategory classification across Projects, Prospects, and Backlog.
 --
 -- Values are currently populated only when category = 'CSS':
 --   PT   = penetration testing / vulnerability assessment
@@ -8,22 +8,22 @@
 --   SAPT = audit + pentest combined work
 
 ALTER TABLE public.projects
-  ADD COLUMN IF NOT EXISTS subcategory TEXT;
+  ADD COLUMN IF NOT EXISTS css_subcategory TEXT;
 
 ALTER TABLE public.prospects
-  ADD COLUMN IF NOT EXISTS subcategory TEXT;
+  ADD COLUMN IF NOT EXISTS css_subcategory TEXT;
 
 ALTER TABLE public.project_targets
-  ADD COLUMN IF NOT EXISTS subcategory TEXT;
+  ADD COLUMN IF NOT EXISTS css_subcategory TEXT;
 
-CREATE INDEX IF NOT EXISTS idx_projects_subcategory
-  ON public.projects (subcategory);
+CREATE INDEX IF NOT EXISTS idx_projects_css_subcategory
+  ON public.projects (css_subcategory);
 
-CREATE INDEX IF NOT EXISTS idx_prospects_subcategory
-  ON public.prospects (subcategory);
+CREATE INDEX IF NOT EXISTS idx_prospects_css_subcategory
+  ON public.prospects (css_subcategory);
 
-CREATE INDEX IF NOT EXISTS idx_project_targets_subcategory
-  ON public.project_targets (subcategory);
+CREATE INDEX IF NOT EXISTS idx_project_targets_css_subcategory
+  ON public.project_targets (css_subcategory);
 
 CREATE OR REPLACE FUNCTION public.enforce_project_targets_column_scope()
 RETURNS TRIGGER
@@ -58,7 +58,7 @@ BEGIN
     NEW.target_date                 IS DISTINCT FROM OLD.target_date OR
     NEW.category                    IS DISTINCT FROM OLD.category OR
     NEW.category_note               IS DISTINCT FROM OLD.category_note OR
-    NEW.subcategory             IS DISTINCT FROM OLD.subcategory OR
+    NEW.css_subcategory             IS DISTINCT FROM OLD.css_subcategory OR
     NEW.created_at                  IS DISTINCT FROM OLD.created_at
   ) THEN
     RAISE EXCEPTION

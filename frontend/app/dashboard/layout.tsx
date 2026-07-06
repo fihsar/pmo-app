@@ -4,7 +4,8 @@ import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { isSupabaseConfigured } from "@/lib/supabase";
-import { useAuthSession } from "@/components/auth-session-provider";
+import { useAuthSession } from "@/hooks/use-auth-session";
+import { useSidebar } from "@/hooks/use-sidebar";
 import { LayoutDashboard, ChevronRight, type LucideIcon, LogOut, History, Settings2 } from "lucide-react";
 import Image from "next/image";
 
@@ -23,7 +24,6 @@ import {
   SidebarMenuSubItem,
   SidebarProvider,
   SidebarTrigger,
-  useSidebar,
 } from "@/components/ui/sidebar";
 import {
   Collapsible,

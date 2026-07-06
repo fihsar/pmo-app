@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { useAuthSession } from "@/components/auth-session-provider";
+import { useAuthSession } from "@/hooks/use-auth-session";
 import { authenticatedFetchJson } from "@/lib/authenticated-fetch";
 import type { AuditEvent } from "@/lib/audit-log.shared";
 
