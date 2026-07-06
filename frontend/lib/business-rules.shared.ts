@@ -127,6 +127,8 @@ const DEFAULT_FCC_KEYWORDS = [
   "cimb berhad",
   "book of octo",
   "renewal ifmx",
+  "fixing data issues",
+  "upgrade os & db",
 ];
 
 const DEFAULT_CSS_KEYWORDS = [
@@ -231,6 +233,8 @@ const DEFAULT_CSS_KEYWORDS = [
   "va bulk",
   "project manager bau",
   "privileged access management",
+  "clm emudhra",
+  "vicarius endpoint",
 ];
 
 export const defaultBusinessRules: BusinessRules = {
