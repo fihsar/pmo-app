@@ -508,6 +508,9 @@ export default function ProjectsPage() {
         'TOTAL_SALES': p.total_sales,
         'GROSS_PROFIT': p.gross_profit,
         'PERCENTAGE_PROGRESS': p.percentage_progress,
+        'PROJECT_START_DATE': p.project_start_date,
+        'PROJECT_END_DATE': p.project_end_date,
+        'GOLIVE_DATE': p.golive_date,
         'CATEGORY': p.category,
         'SUBCATEGORY': p.subcategory,
         'CATEGORY_NOTE': p.category_note

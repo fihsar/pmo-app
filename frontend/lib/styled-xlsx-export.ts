@@ -1,6 +1,6 @@
 "use client";
 
-type ExcelValue = string | number | boolean | null | undefined;
+type ExcelValue = string | number | boolean | Date | null | undefined;
 type ExcelRow = Record<string, ExcelValue>;
 
 const MIME_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -39,7 +39,53 @@ function safeNumber(value: number): string | null {
   return Number.isFinite(value) ? String(value) : null;
 }
 
-function cellXml(ref: string, value: ExcelValue, styleId: 1 | 2): string {
+function isDateHeader(header?: string): boolean {
+  if (!header) return false;
+  const h = header.toUpperCase();
+  return h.includes("DATE") || h.endsWith("_AT") || h.includes("TANGGAL") || h.includes("WAKTU");
+}
+
+function toExcelSerialDate(value: ExcelValue): number | null {
+  if (value === null || value === undefined || value === "") return null;
+
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    const utcMs = Date.UTC(value.getFullYear(), value.getMonth(), value.getDate());
+    return 25569 + Math.floor(utcMs / 86400000);
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+
+    // Match YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss...
+    const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})(?:T.*)?$/);
+    if (isoMatch) {
+      const year = parseInt(isoMatch[1], 10);
+      const month = parseInt(isoMatch[2], 10);
+      const day = parseInt(isoMatch[3], 10);
+      if (year >= 1900 && year <= 2100 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+        const utcMs = Date.UTC(year, month - 1, day);
+        return 25569 + Math.floor(utcMs / 86400000);
+      }
+    }
+
+    // Match DD-MM-YYYY or DD/MM/YYYY
+    const ddmmyyyyMatch = trimmed.match(/^(\d{2})[-/.](\d{2})[-/.](\d{4})$/);
+    if (ddmmyyyyMatch) {
+      const day = parseInt(ddmmyyyyMatch[1], 10);
+      const month = parseInt(ddmmyyyyMatch[2], 10);
+      const year = parseInt(ddmmyyyyMatch[3], 10);
+      if (year >= 1900 && year <= 2100 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+        const utcMs = Date.UTC(year, month - 1, day);
+        return 25569 + Math.floor(utcMs / 86400000);
+      }
+    }
+  }
+
+  return null;
+}
+
+function cellXml(ref: string, value: ExcelValue, styleId: number, header?: string): string {
   if (value === null || value === undefined || value === "") {
     return `<c r="${ref}" s="${styleId}"/>`;
   }
@@ -51,6 +97,16 @@ function cellXml(ref: string, value: ExcelValue, styleId: 1 | 2): string {
 
   if (typeof value === "boolean") {
     return `<c r="${ref}" s="${styleId}" t="b"><v>${value ? 1 : 0}</v></c>`;
+  }
+
+  if (styleId !== 1) {
+    const dateHeader = isDateHeader(header);
+    if (value instanceof Date || dateHeader || typeof value === "string") {
+      const serialDate = toExcelSerialDate(value);
+      if (serialDate !== null) {
+        return `<c r="${ref}" s="3"><v>${serialDate}</v></c>`;
+      }
+    }
   }
 
   return `<c r="${ref}" s="${styleId}" t="inlineStr"><is><t>${escapeXml(String(value))}</t></is></c>`;
@@ -77,13 +133,13 @@ function worksheetXml(rows: ExcelRow[]): string {
     .join("");
 
   const headerCells = headers
-    .map((header, index) => cellXml(cellRef(1, index + 1), header, 1))
+    .map((header, index) => cellXml(cellRef(1, index + 1), header, 1, header))
     .join("");
   const dataRows = rows
     .map((row, rowIndex) => {
       const excelRow = rowIndex + 2;
       const cells = headers
-        .map((header, columnIndex) => cellXml(cellRef(excelRow, columnIndex + 1), row[header], 2))
+        .map((header, columnIndex) => cellXml(cellRef(excelRow, columnIndex + 1), row[header], 2, header))
         .join("");
       return `<row r="${excelRow}">${cells}</row>`;
     })
@@ -105,6 +161,9 @@ function worksheetXml(rows: ExcelRow[]): string {
 function stylesXml(): string {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <numFmts count="1">
+    <numFmt numFmtId="165" formatCode="yyyy-mm-dd"/>
+  </numFmts>
   <fonts count="2">
     <font><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/></font>
     <font><b/><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/></font>
@@ -125,10 +184,11 @@ function stylesXml(): string {
     </border>
   </borders>
   <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-  <cellXfs count="3">
+  <cellXfs count="4">
     <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
     <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>
     <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"/>
+    <xf numFmtId="165" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/>
   </cellXfs>
   <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
   <dxfs count="0"/>
