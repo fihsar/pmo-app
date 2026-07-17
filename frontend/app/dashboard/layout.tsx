@@ -129,8 +129,8 @@ function DashboardSidebarContent({ children }: { children: React.ReactNode }) {
             <SidebarMenuItem>
               <SidebarMenuButton size="lg" asChild onClick={() => handleItemClick(true)}>
                 <Link href="/dashboard">
-                  <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary/10 p-1">
-                    <Image src="/logo.png" alt="PMO Logo" width={24} height={24} className="rounded-sm" />
+                  <div className="flex aspect-square size-8 items-center justify-center">
+                    <Image src="/logo.png" alt="PMO Logo" width={28} height={28} className="object-contain" />
                   </div>
                   <div className="flex flex-col gap-0.5 leading-none">
                     <span className="font-semibold text-primary">PMO Dashboard</span>

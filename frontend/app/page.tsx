@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import {
   Card,
   CardContent,
@@ -100,8 +101,8 @@ export default function App() {
         
         {/* Modern Minimalist Branding */}
         <div className="text-center space-y-3">
-          <div className="mb-2 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm transition-transform hover:scale-105">
-            <LayoutDashboard className="h-6 w-6" />
+          <div className="mb-1 inline-flex items-center justify-center transition-transform hover:scale-105">
+            <Image src="/logo-full.png" alt="Q2 Technologies Logo" width={180} height={160} className="h-auto w-40 object-contain" priority />
           </div>
           <div className="space-y-1">
             <h1 className="text-2xl font-semibold tracking-tight">PMO Dashboard</h1>
