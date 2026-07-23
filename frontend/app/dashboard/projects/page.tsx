@@ -520,8 +520,8 @@ export default function ProjectsPage() {
         'PQI': p.pqi,
         'CATEGORY': p.category,
         'SUBCATEGORY': p.subcategory,
-        'CATEGORY_NOTE': p.category_note,
-        'PROGRESS_NOTE': p.progress_note
+        'PROGRESS_NOTE': p.progress_note,
+        'PROJECT_ADMIN': ''
       }));
 
       exportStyledXlsx(exportData, "Projects", `Projects_Export_${new Date().toISOString().split('T')[0]}.xlsx`);
