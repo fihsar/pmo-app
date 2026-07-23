@@ -244,10 +244,10 @@ export const defaultBusinessRules: BusinessRules = {
   allowedAccountManagers: [],
   kpiProjectManagers: [],
   keywordRules: {
-    strictFccKeywords: [],
-    strictCssKeywords: [],
-    fccKeywords: [],
-    cssKeywords: [],
+    strictFccKeywords: DEFAULT_STRICT_FCC_KEYWORDS,
+    strictCssKeywords: DEFAULT_STRICT_CSS_KEYWORDS,
+    fccKeywords: DEFAULT_FCC_KEYWORDS,
+    cssKeywords: DEFAULT_CSS_KEYWORDS,
   },
 };
 

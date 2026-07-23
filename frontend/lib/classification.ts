@@ -17,7 +17,7 @@ const CATEGORY_NOTES: CategoryResult["category_note"][] = [
   "manual-review",
 ];
 
-const BUILT_IN_FCC_KEYWORDS = ["sam", "cdd", "wlf", "fixing data issues", "upgrade os & db"];
+const BUILT_IN_FCC_KEYWORDS = ["sam", "cdd", "wlf", "fixing data issues", "upgrade os & db", "etl", "functional consultation"];
 const BUILT_IN_CSS_KEYWORDS = ["clm emudhra", "vicarius endpoint"];
 const WORD_BOUNDARY_KEYWORDS = ["cdd", "pam", "sam", "siem", "va", "wlf", "etl"];
 
