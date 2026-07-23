@@ -511,9 +511,17 @@ export default function ProjectsPage() {
         'PROJECT_START_DATE': p.project_start_date,
         'PROJECT_END_DATE': p.project_end_date,
         'GOLIVE_DATE': p.golive_date,
+        'ACTUAL_GOLIVE_DATE': p.actual_golive_date,
+        'WARRANTY_END_DATE': p.warranty_end_date,
+        'ACTUAL_WARRANTY_END_DATE': p.actual_warranty_end_date,
+        'MAINTENANCE_END_DATE': p.maintenance_end_date,
+        'PQI_TIME': p.pqi_time,
+        'PQI_COST': p.pqi_cost,
+        'PQI': p.pqi,
         'CATEGORY': p.category,
         'SUBCATEGORY': p.subcategory,
-        'CATEGORY_NOTE': p.category_note
+        'CATEGORY_NOTE': p.category_note,
+        'PROGRESS_NOTE': p.progress_note
       }));
 
       exportStyledXlsx(exportData, "Projects", `Projects_Export_${new Date().toISOString().split('T')[0]}.xlsx`);
