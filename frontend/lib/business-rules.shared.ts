@@ -129,6 +129,8 @@ const DEFAULT_FCC_KEYWORDS = [
   "renewal ifmx",
   "fixing data issues",
   "upgrade os & db",
+  "etl",
+  "functional consultation",
 ];
 
 const DEFAULT_CSS_KEYWORDS = [

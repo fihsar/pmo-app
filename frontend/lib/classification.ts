@@ -19,7 +19,7 @@ const CATEGORY_NOTES: CategoryResult["category_note"][] = [
 
 const BUILT_IN_FCC_KEYWORDS = ["sam", "cdd", "wlf", "fixing data issues", "upgrade os & db"];
 const BUILT_IN_CSS_KEYWORDS = ["clm emudhra", "vicarius endpoint"];
-const WORD_BOUNDARY_KEYWORDS = ["cdd", "pam", "sam", "siem", "va", "wlf"];
+const WORD_BOUNDARY_KEYWORDS = ["cdd", "pam", "sam", "siem", "va", "wlf", "etl"];
 
 function normalizeText(value: unknown): string {
   return String(value || "")
