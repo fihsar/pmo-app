@@ -18,7 +18,6 @@ const DEFAULT_STRICT_FCC_KEYWORDS = [
   "cimb bank berhad",
   "cimb bank berhard",
   "garuda",
-  "virtual account",
   "va bni",
   "va bri",
   "va mandiri",
