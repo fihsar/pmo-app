@@ -23,12 +23,13 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useAuthSession } from "@/hooks/use-auth-session";
-import { determineCategory } from "@/lib/classification";
+import { determineCategory, determineSubcategory, type Category } from "@/lib/classification";
 import { getErrorMessage, isMissingSubcategoryError } from "@/lib/error-message";
 import { exportStyledXlsx } from "@/lib/styled-xlsx-export";
 import type { Tables, Database } from "@/lib/database.types";
 
 type ProjectTarget = Tables<"project_targets">;
+const CATEGORY_OPTIONS: Category[] = ["FCC", "CSS", "UNCLASSIFIED"];
 
 // Classification logic is now imported from @/lib/classification
 
@@ -80,6 +81,7 @@ export default function ProjectTargetPage() {
   const { role } = useAuthSession();
   const isSuperadmin = role === "Superadmin";
   const canEditDate = role === "Superadmin" || role === "Project Administrator";
+  const canEditCategory = canEditDate;
 
   // Debounce search query
   useEffect(() => {
@@ -561,6 +563,60 @@ export default function ProjectTargetPage() {
     if (error) console.error("Failed to update status:", error.message);
   };
 
+  const getCategoryBadgeClass = (category: string | null | undefined) => cn(
+    "px-2 py-0.5 rounded-full text-[10px] font-medium border whitespace-nowrap",
+    category === "FCC" && "bg-blue-100 text-blue-700 border-blue-200",
+    category === "CSS" && "bg-purple-100 text-purple-700 border-purple-200",
+    category === "UNCLASSIFIED" && "bg-slate-100 text-slate-700 border-slate-200",
+    !category && "bg-muted text-muted-foreground border-border"
+  );
+
+  const updateCategory = async (target: ProjectTarget, newCategory: Category) => {
+    if (!target.id || !isSupabaseConfigured || target.category === newCategory) return;
+
+    setError("");
+    setSuccess("");
+
+    const previousCategory = target.category;
+    const previousCategoryNote = target.category_note;
+    const previousSubcategory = target.subcategory;
+    const nextSubcategory = newCategory === "CSS"
+      ? determineSubcategory(target as Record<string, unknown>, newCategory)
+      : null;
+
+    setTargets(prev => prev.map(t => t.id === target.id ? {
+      ...t,
+      category: newCategory,
+      category_note: "manual-review",
+      subcategory: nextSubcategory,
+    } : t));
+
+    const { error: updateError } = await supabase
+      .from("project_targets")
+      .update({
+        category: newCategory,
+        category_note: "manual-review",
+        subcategory: nextSubcategory,
+      })
+      .eq("id", target.id)
+      .select("id")
+      .single();
+
+    if (updateError) {
+      console.error("Failed to update category:", updateError);
+      setError(`Failed to update category: ${updateError.message}`);
+      setTargets(prev => prev.map(t => t.id === target.id ? {
+        ...t,
+        category: previousCategory,
+        category_note: previousCategoryNote,
+        subcategory: previousSubcategory,
+      } : t));
+      return;
+    }
+
+    void loadTargets();
+  };
+
   const handleDelete = async (target: ProjectTarget) => {
     if (!target.id || !isSupabaseConfigured) return;
     const { error: deleteError } = await supabase.from("project_targets").delete().eq("id", target.id);
@@ -864,14 +920,33 @@ export default function ProjectTargetPage() {
                         </td>
                         <td className="py-2 text-center">
                           <div className="flex justify-center">
-                            <span className={cn(
-                              "px-2 py-0.5 rounded-full text-[10px] font-medium border whitespace-nowrap",
-                              target.category === "FCC" && "bg-blue-100 text-blue-700 border-blue-200",
-                              target.category === "CSS" && "bg-purple-100 text-purple-700 border-purple-200",
-                              target.category === "UNCLASSIFIED" && "bg-slate-100 text-slate-700 border-slate-200"
-                            )} title={target.category_note || ""}>
-                              {target.category || "-"}
-                            </span>
+                            {canEditCategory ? (
+                              <Select
+                                value={(target.category || "UNCLASSIFIED") as Category}
+                                onValueChange={(val) => void updateCategory(target, val as Category)}
+                              >
+                                <SelectTrigger
+                                  className={cn(
+                                    "!h-auto !py-0.5 !px-2 !rounded-full !justify-center shadow-none w-[94px] focus:ring-0 focus:ring-offset-0 hover:opacity-80 transition-opacity [&>svg]:hidden",
+                                    getCategoryBadgeClass(target.category || "UNCLASSIFIED")
+                                  )}
+                                  title={target.category_note || "Click to edit"}
+                                >
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {CATEGORY_OPTIONS.map((category) => (
+                                    <SelectItem key={category} value={category} className="text-xs font-medium">
+                                      {category === "UNCLASSIFIED" ? "Unclassified" : category}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <span className={getCategoryBadgeClass(target.category)} title={target.category_note || ""}>
+                                {target.category || "-"}
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td className="py-2 text-center">
