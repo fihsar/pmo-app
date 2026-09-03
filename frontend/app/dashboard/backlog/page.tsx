@@ -927,7 +927,7 @@ export default function ProjectTargetPage() {
                               >
                                 <SelectTrigger
                                   className={cn(
-                                    "!h-auto !py-0.5 !px-2 !rounded-full !justify-center shadow-none w-[94px] focus:ring-0 focus:ring-offset-0 hover:opacity-80 transition-opacity [&>svg]:hidden",
+                                    "!h-auto !w-auto !min-w-0 !py-0.5 !px-2 !rounded-full !justify-center shadow-none focus:ring-0 focus:ring-offset-0 hover:opacity-80 transition-opacity [&>svg]:hidden",
                                     getCategoryBadgeClass(target.category || "UNCLASSIFIED")
                                   )}
                                   title={target.category_note || "Click to edit"}
